@@ -51,6 +51,9 @@ if (!Array.isArray(map.sites) || map.sites.length === 0) {
       dates.push(site.lastVerified)
     }
     if (site.verifiedBy !== undefined) checkField(label, 'verifiedBy', site.verifiedBy)
+    if (site.manualIntervention !== undefined && site.manualIntervention !== true) {
+      errors.push(`${label}: "manualIntervention" must be true when present, got ${JSON.stringify(site.manualIntervention)}`)
+    }
     if (typeof site.domain === 'string' && typeof site.task === 'string') {
       const key = `${site.domain}/${site.task}`
       if (seen.has(key)) errors.push(`${label}: duplicate domain+task "${key}"`)

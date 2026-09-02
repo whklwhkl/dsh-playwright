@@ -11,11 +11,38 @@
       "verifiedBy": "playwright-browser 0.2.0"
     },
     {
-      "domain": "duckduckgo.com",
-      "site": "DuckDuckGo",
-      "task": "search",
-      "behavior": "Served a human-verification challenge instead of results for automated search on both the standard and html endpoints; under headless the homepage search input may also never appear. Control run: Bing answered on the same network path, so this is a site fact.",
-      "tactic": "Treat as unavailable for autonomous search: use Bing instead. If DuckDuckGo is required, hand the challenge to the user to complete manually.",
+      "domain": "wikipedia.org",
+      "site": "Wikipedia",
+      "task": "extract",
+      "behavior": "Article pages render statically and fully under headless; body paragraphs extract without login or delays.",
+      "tactic": "Reliable for content extraction. Extract paragraphs directly, no special handling needed.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)"
+    },
+    {
+      "domain": "github.com",
+      "site": "GitHub",
+      "task": "browse",
+      "behavior": "Public repository pages render fully under headless without login; titles and page content extract cleanly.",
+      "tactic": "Reliable for reading public repos and issues. Some interactive counters need JS settle time; wait briefly before extracting.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)"
+    },
+    {
+      "domain": "bilibili.com",
+      "site": "Bilibili",
+      "task": "browse",
+      "behavior": "Video pages render fully under headless without login: title, play counts and page text extract cleanly. URLs redirect to a trailing-slash form on load.",
+      "tactic": "Wait for the initial redirect and navigation to settle (about 3s) before evaluating; content is public, login is only needed for HD video.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)"
+    },
+    {
+      "domain": "news.ycombinator.com",
+      "site": "Hacker News",
+      "task": "extract",
+      "behavior": "Front page and item pages are plain HTML and extract instantly under headless; no anti-automation signals observed.",
+      "tactic": "Reliable for headline and discussion extraction.",
       "lastVerified": "2026-09-03",
       "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)"
     },
@@ -26,7 +53,18 @@
       "behavior": "Search triggers a CAPTCHA for automated access.",
       "tactic": "Do not retry. Switch to Bing and mention the switch in the final answer.",
       "lastVerified": "2026-09-03",
-      "verifiedBy": "playwright-browser 0.2.0"
+      "verifiedBy": "playwright-browser 0.2.0",
+      "manualIntervention": true
+    },
+    {
+      "domain": "duckduckgo.com",
+      "site": "DuckDuckGo",
+      "task": "search",
+      "behavior": "Served a human-verification challenge instead of results for automated search on both the standard and html endpoints; under headless the homepage search input may also never appear. Control run: Bing answered on the same network path, so this is a site fact.",
+      "tactic": "Treat as unavailable for autonomous search: use Bing instead. If DuckDuckGo is required, hand the challenge to the user to complete manually.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
     },
     {
       "domain": "baidu.com",
@@ -35,7 +73,58 @@
       "behavior": "The home search input is invisible under headless mode (anti-automation).",
       "tactic": "Switch to Bing; if Baidu is required, ask the user to set PW_HEADLESS=false and restart DSH, or let the user complete the step manually.",
       "lastVerified": "2026-09-03",
-      "verifiedBy": "playwright-browser 0.2.0"
+      "verifiedBy": "playwright-browser 0.2.0",
+      "manualIntervention": true
+    },
+    {
+      "domain": "stackoverflow.com",
+      "site": "Stack Overflow",
+      "task": "read",
+      "behavior": "Question pages serve a Cloudflare-style 'please wait' interstitial that did not clear after a 10-second wait under headless; challenges are probabilistic and depend on IP reputation.",
+      "tactic": "If the interstitial persists past a 10-second wait, stop and hand the page to the user, or extract the answer from an alternative source.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
+    },
+    {
+      "domain": "npmjs.com",
+      "site": "npm",
+      "task": "read",
+      "behavior": "Package pages serve a Cloudflare-style 'please wait' interstitial under headless on this network path, same protection family as Stack Overflow.",
+      "tactic": "If the interstitial persists past a 10-second wait, stop and hand the page to the user, or get package facts from the registry API instead.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
+    },
+    {
+      "domain": "zhihu.com",
+      "site": "Zhihu",
+      "task": "read",
+      "behavior": "Question requests are rejected with an anomaly JSON error (code 40362, 'requests look abnormal, access temporarily limited') instead of the page; restriction is probabilistic and IP/behavior dependent.",
+      "tactic": "Do not retry the same request. Fall back to another source, or let the user log in and complete the step manually.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
+    },
+    {
+      "domain": "jd.com",
+      "site": "JD",
+      "task": "search",
+      "behavior": "Search page loads but product results are withheld with a rate-limit notice ('search unavailable due to frequent access') under automated access; probabilistic, works again after waiting.",
+      "tactic": "Do not hammer retries. Wait and retry once; if still limited, ask the user to search manually in their browser.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
+    },
+    {
+      "domain": "taobao.com",
+      "site": "Taobao",
+      "task": "search",
+      "behavior": "Search results stay behind a login wall without an account: the page renders but results never finish loading, showing a sign-in prompt.",
+      "tactic": "Do not loop on the loading page. Ask the user to log in (or search manually); login is a human step.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
+      "manualIntervention": true
     }
   ]
 }

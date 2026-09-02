@@ -24,6 +24,7 @@ Each element of `sites`:
 | `tactic` | string | What the agent should do. Must stay inside the skill's boundary (see below). |
 | `lastVerified` | string | ISO date `YYYY-MM-DD` of the last real check. |
 | `verifiedBy` | string? | Optional provenance, e.g. `playwright-browser 0.2.0` or your GitHub handle. |
+| `manualIntervention` | boolean? | `true` when completing the task needs a human step — CAPTCHA, login wall, or rate-limit wait. The `tactic` must say what the human does. Omit when the site works autonomously. |
 
 ## Content rules
 
