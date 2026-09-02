@@ -5,6 +5,7 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 - 宿主进程内直接 `require('playwright-core')`，无需外部桥服务或端口
 - 浏览器按需懒启动，插件卸载时自动关闭
 - 只依赖 `playwright-core`，无其他运行时依赖
+- 工具描述/参数文档/输出文案支持中英双语（`PW_LANG=en` 切换，默认中文）— [English README](./README.en.md)
 
 ## 功能一览
 
@@ -86,6 +87,7 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
+| `PW_LANG` | `zh` | 设为 `en` 切换工具描述与输出为英文 |
 | `PW_CHROMIUM_PATH` | 自动发现 | 复用指定浏览器可执行文件 |
 | `PW_HEADLESS` | `true` | 设为 `false` 弹出可见窗口 |
 | `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
