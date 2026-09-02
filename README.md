@@ -87,7 +87,9 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 ## 内置 skill：playwright-browser-tips
 
-bundle 同时携带一个 `playwright-browser-tips` skill：常见站点对策与失败恢复技巧（选择器失效、元素不可见、抓取为空、反自动化边界），中英双语跟随 `PW_LANG`。模型在 browser_* 工具失败或自动化搜索/登录流程时按需加载；用户也可以直接输入 `/playwright-browser-tips` 调用。
+bundle 同时携带一个 `playwright-browser-tips` skill，正文是一张**站点地图**：各站点在自动化下的实测行为与对策（搜索类任务默认 Bing），加上通用恢复手法。中英双语跟随 `PW_LANG`；模型在 browser_* 工具失败或自动化搜索/登录流程时按需加载，用户也可以直接输入 `/playwright-browser-tips` 调用。
+
+地图欢迎共建——人和 agent 都可以按 [SITE-MAP-SPEC.md](./SITE-MAP-SPEC.md) 的规范提交条目（只改 `assets/site-map.json`），提交前运行 `node scripts/validate-site-map.js` 并把输出贴进 PR。框架文本（含反自动化边界：验证码一律由用户人工完成）由代码持有，不随地图数据变化。
 
 skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app 等基于 `dsh-base` 的 profile 均满足。同名项目或用户目录 skill 优先级更高，可本地覆盖插件内置版本。
 

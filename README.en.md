@@ -88,7 +88,9 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 ## Bundled skill: playwright-browser-tips
 
-The bundle also carries a `playwright-browser-tips` skill: site tactics and recovery patterns (failed selectors, invisible elements, empty extracts, anti-automation boundaries), bilingual following `PW_LANG`. The model loads it on demand when browser_* tools fail or when automating search/login flows; users can also invoke it directly with `/playwright-browser-tips`.
+The bundle also carries a `playwright-browser-tips` skill whose body is a **site map**: per-site observed behavior and tactics under automation (search defaults to Bing), plus general recovery patterns. Bilingual following `PW_LANG`; the model loads it on demand when browser_* tools fail or when automating search/login flows, and users can invoke it directly with `/playwright-browser-tips`.
+
+The map welcomes contributions — humans and agents alike can submit entries per [SITE-MAP-SPEC.md](./SITE-MAP-SPEC.md) (touch only `assets/site-map.json`), running `node scripts/validate-site-map.js` first and attaching its output to the PR. The framework text — including the anti-automation boundary (CAPTCHAs are always completed manually by the user) — is code-owned and does not change with map data.
 
 The skill needs a profile with the skill registry — every `dsh-base`-backed profile (web, headless, acp, sdk-app) provides one. Same-name project or user-directory skills take precedence and can override the bundled version locally.
 

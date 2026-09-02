@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "sites": [
+    {
+      "domain": "bing.com",
+      "site": "Bing",
+      "task": "search",
+      "behavior": "Search works end to end for automated access: fill the input, press Enter, extract results.",
+      "tactic": "Preferred engine for search tasks. Start here.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0"
+    },
+    {
+      "domain": "google.com",
+      "site": "Google",
+      "task": "search",
+      "behavior": "Search triggers a CAPTCHA for automated access.",
+      "tactic": "Do not retry. Switch to Bing and mention the switch in the final answer.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0"
+    },
+    {
+      "domain": "baidu.com",
+      "site": "Baidu",
+      "task": "search",
+      "behavior": "The home search input is invisible under headless mode (anti-automation).",
+      "tactic": "Switch to Bing; if Baidu is required, ask the user to set PW_HEADLESS=false and restart DSH, or let the user complete the step manually.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0"
+    }
+  ]
+}
