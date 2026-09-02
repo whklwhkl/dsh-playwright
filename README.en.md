@@ -122,6 +122,14 @@ console.log(tools.map((t) => t.name).join('\n'))
 "
 ```
 
+## Community & Support
+
+This plugin is part of the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) ecosystem and carries the official `dsh-plugin` topic for discoverability, per the [community support guide](https://github.com/deepseek-ai/deepseek-harness#community-and-support).
+
+- Plugin issues / feature requests: open an [Issue](https://github.com/whklwhkl/dsh-playwright/issues) or start a [Discussion](https://github.com/whklwhkl/dsh-playwright/discussions) here
+- DSH framework feedback & bug reports: submit to [DeepSeek Harness Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions)
+- Join the DeepSeek Harness Discord community (see the official README)
+
 ## License
 
 MIT

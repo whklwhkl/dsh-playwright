@@ -120,6 +120,14 @@ console.log(tools.map((t) => t.name).join('\n'))
 "
 ```
 
+## 社区与支持
+
+本插件是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）生态插件，按官方[社区支持指南](https://github.com/deepseek-ai/deepseek-harness#community-and-support)添加了 `dsh-plugin` topic 以便被发现。
+
+- 插件问题、功能建议：在本仓库提 [Issues](https://github.com/whklwhkl/dsh-playwright/issues) 或 [Discussions](https://github.com/whklwhkl/dsh-playwright/discussions)
+- DSH 框架问题与反馈：提交到 [DeepSeek Harness Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions)
+- 加入 DeepSeek Harness Discord 社区（见官方 README）
+
 ## License
 
 MIT
