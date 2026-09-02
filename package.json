@@ -1,6 +1,6 @@
 {
   "name": "playwright-browser",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Playwright browser automation tools for DSH: open pages, click, type, fill, extract, screenshot.",
   "type": "module",
   "main": "lib/index.js",
