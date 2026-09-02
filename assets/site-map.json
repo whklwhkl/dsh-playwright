@@ -11,6 +11,15 @@
       "verifiedBy": "playwright-browser 0.2.0"
     },
     {
+      "domain": "duckduckgo.com",
+      "site": "DuckDuckGo",
+      "task": "search",
+      "behavior": "Served a human-verification challenge instead of results for automated search on both the standard and html endpoints; under headless the homepage search input may also never appear. Control run: Bing answered on the same network path, so this is a site fact.",
+      "tactic": "Treat as unavailable for autonomous search: use Bing instead. If DuckDuckGo is required, hand the challenge to the user to complete manually.",
+      "lastVerified": "2026-09-03",
+      "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)"
+    },
+    {
       "domain": "google.com",
       "site": "Google",
       "task": "search",

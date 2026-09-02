@@ -32,6 +32,35 @@ Each element of `sites`:
 3. **One observation, one entry.** A row claims "verified on date X". Re-verify before updating the date; delete entries that no longer hold.
 4. **Keep it minimal.** One row per site+task. If a tactic needs three sentences, the entry is about the wrong granularity.
 
+## Verification runbook (how to produce an entry)
+
+Every entry must come from a real run against the live site, using the plugin's own launch configuration. The DuckDuckGo entry (2026-09-03) is the worked example of the full loop:
+
+1. **Drive the real flow** with the plugin's launch config (its `playwright-core`, `PW_CHROMIUM_PATH` or auto-discovery, headless by default) and the task's natural steps. Expect the first attempt to fail sometimes — that is data, not noise.
+2. **Characterize before concluding.** When something fails, rerun with diagnostics (page title, form controls present, full body text). A truncated 200-character body dump hid DuckDuckGo's challenge message; the full dump revealed it. Do not write an entry from a guess about the cause.
+3. **Run a control.** Verify a site known to work (Bing for search) on the same network path in the same run. Without the control you cannot tell a site fact from an environment problem.
+4. **Write the entry within the boundary**: observable behavior, tactic that switches/hands off rather than circumvents, today's date, provenance.
+5. **Validate and submit** (`node scripts/validate-site-map.js`, output into the PR).
+
+Minimal probe template for step 1 (adjust selectors and steps per task):
+
+```bash
+cd <plugin checkout> && node --input-type=module -e "
+import { chromium } from 'playwright-core'
+const b = await chromium.launch({
+  headless: true,
+  executablePath: process.env.PW_CHROMIUM_PATH,   // or omit for auto-discovery
+  args: ['--no-sandbox', '--disable-dev-shm-usage'],
+})
+const p = await (await b.newContext()).newPage()
+await p.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+console.log('title:', await p.title())
+await b.close()
+"
+```
+
+Agents submitting entries: include the probe output (or session transcript excerpts) and the control-run result in the PR description, not just the entry.
+
 ## Submitting
 
 ```bash
