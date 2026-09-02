@@ -26,36 +26,24 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 
 ## 安装到 DSH profile
 
-在目标 DSH 实例的 profile 目录（如 `~/.dsh/profiles/<profile>/`）操作：
-
-**1. 编辑 `package.json`，加入依赖与 bundle 注册：**
-
-```jsonc
-{
-  "dependencies": {
-    "playwright-browser": "git+https://github.com/<你的用户名>/playwright-browser.git"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        // ... 原有 bundle ...
-        "playwright-browser"
-      ]
-    }
-  }
-}
-```
-
-**2. 安装依赖：**
+在任意目录执行一条命令（`dsh` 自行定位 profile 目录，首次使用会自动初始化）：
 
 ```bash
-# 在 profile 目录下
-npm install
-# 或 pnpm install（注意：本 profile 的 pnpm 若开启 allowBuilds 白名单，
-# 需要确认依赖的 postinstall 不被拦截；纯 playwright-core 无 postinstall，通常没问题）
+# 示例：装进 web profile
+dsh plugin --profile web add git+https://github.com/whklwhkl/dsh-playwright.git
 ```
 
-**3. 重启 DSH：** bundle 列表在启动时读取，重启后 `browser_*` 工具对 profile 下所有会话自动可用。
+`dsh plugin` 把 `add` 之后的参数原样转发给 profile 目录里的 pnpm，安装完成后自动把声明了 `dsh.bundle` 的依赖追加进 `dsh.profile.bundles`——无需手改 `package.json`。registry 包名、`github:<user>/<repo>`、本地路径等 pnpm 支持的安装源均可。
+
+本地开发时指向 checkout 目录，加 `link:` 前缀以符号链接安装，改动后无需重新安装（重启 DSH 生效）：
+
+```bash
+dsh plugin --profile web add link:/path/to/dsh-playwright
+```
+
+**重启 DSH：** bundle 列表在启动时读取，重启后 `browser_*` 工具对 profile 下所有会话自动可用。
+
+> 旧版 dsh 没有 `plugin` 子命令时：手动把 `playwright-browser` 加入 profile `package.json` 的 dependencies，并追加进 `dsh.profile.bundles`，再在 profile 目录执行 `pnpm install`。
 
 ## 准备浏览器
 
@@ -103,8 +91,9 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 | 现象 | 处理 |
 |---|---|
 | `Executable doesn't exist ... ms-playwright` | 浏览器未下载，执行 `npx playwright-core install chromium` |
+| 下载 Chromium 时连接中断/超时（代理环境常见） | 大文件经代理易被中断；改用方式 B 的 `PW_CHROMIUM_PATH` 指向系统 Chrome，免下载 |
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
-| 站点弹验证码（如百度滑块） | 反爬机制，非插件问题；可换搜索引擎或配合人工过验证 |
+| 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |
 | 元素"not visible" | 页面改版或选择器过时，用 `browser_eval` 检查 DOM 再选选择器 |
 | 当前模型看不了截图 | `browser_screenshot` 只保存文件；需要支持图片输入的视觉模型才能"看"图 |
 

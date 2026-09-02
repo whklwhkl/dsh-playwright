@@ -27,37 +27,24 @@ Language: tool descriptions, parameter docs and result text are bilingual. Set `
 
 ## Installing into a DSH profile
 
-In the target DSH instance's profile directory (e.g. `~/.dsh/profiles/<profile>/`):
-
-**1. Edit `package.json` — add the dependency and register the bundle:**
-
-```jsonc
-{
-  "dependencies": {
-    "playwright-browser": "git+https://github.com/<your-username>/playwright-browser.git"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        // ... existing bundles ...
-        "playwright-browser"
-      ]
-    }
-  }
-}
-```
-
-**2. Install dependencies:**
+One command from any directory (`dsh` locates the profile directory itself and initializes it on first use):
 
 ```bash
-# inside the profile directory
-npm install
-# or pnpm install (note: if this profile enables an allowBuilds allowlist,
-# make sure the dependency's postinstall is not blocked; plain playwright-core
-# has no postinstall, so this is usually fine)
+# example: install into the web profile
+dsh plugin --profile web add git+https://github.com/whklwhkl/dsh-playwright.git
 ```
 
-**3. Restart DSH:** bundles are read at startup. After the restart, the `browser_*` tools are available to every session under this profile.
+`dsh plugin` forwards everything after `add` to pnpm inside the profile directory, then automatically appends dependencies that declare `dsh.bundle` to `dsh.profile.bundles` — no manual `package.json` editing. Any pnpm install source works: registry names, `github:<user>/<repo>`, local paths.
+
+For local development, point at your checkout with a `link:` prefix to install as a symlink, so edits need no reinstall (a DSH restart picks them up):
+
+```bash
+dsh plugin --profile web add link:/path/to/dsh-playwright
+```
+
+**Restart DSH:** bundles are read at startup. After the restart, the `browser_*` tools are available to every session under this profile.
+
+> On dsh versions without the `plugin` subcommand: add `playwright-browser` to the profile `package.json` dependencies, append `playwright-browser` to `dsh.profile.bundles`, and run `pnpm install` inside the profile directory.
 
 ## Preparing the browser
 
@@ -105,8 +92,9 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 | Symptom | Fix |
 |---|---|
 | `Executable doesn't exist ... ms-playwright` | Browser not downloaded; run `npx playwright-core install chromium` |
+| Chromium download drops / times out (common behind proxies) | Large transfers through a proxy are prone to interruption; use Option B's `PW_CHROMIUM_PATH` pointing at a system Chrome instead |
 | `net::ERR_CONNECTION_CLOSED` | Network issue or anti-bot on the target site; try another site / retry later |
-| CAPTCHA popup (e.g. Baidu slider) | Anti-bot mechanism, not a plugin problem; switch search engine or solve it manually |
+| CAPTCHA popup (e.g. Baidu slider), input box invisible under headless | Anti-automation, not a plugin problem; Bing worked end to end in testing — prefer Bing, or set `PW_HEADLESS=false` for headed mode |
 | Element "not visible" | Page changed or selector outdated; use `browser_eval` to inspect the DOM and pick a new selector |
 | The current model can't view screenshots | `browser_screenshot` only saves a file; a vision-capable model is needed to "see" the image |
 
