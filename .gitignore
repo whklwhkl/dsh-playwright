@@ -10,3 +10,7 @@ shots/
 
 # misc
 .DS_Store
+
+# pnpm local store and lockfile (library package, lockfile not tracked)
+.pnpm-store/
+pnpm-lock.yaml
