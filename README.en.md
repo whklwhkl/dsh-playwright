@@ -86,6 +86,12 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 | `PW_HEADLESS` | `true` | Set to `false` to show a visible window |
 | `PW_SHOT_DIR` | `shots/` under the plugin dir | Directory for screenshots |
 
+## Bundled skill: playwright-browser-tips
+
+The bundle also carries a `playwright-browser-tips` skill: site tactics and recovery patterns (failed selectors, invisible elements, empty extracts, anti-automation boundaries), bilingual following `PW_LANG`. The model loads it on demand when browser_* tools fail or when automating search/login flows; users can also invoke it directly with `/playwright-browser-tips`.
+
+The skill needs a profile with the skill registry — every `dsh-base`-backed profile (web, headless, acp, sdk-app) provides one. Same-name project or user-directory skills take precedence and can override the bundled version locally.
+
 ## Usage examples (what to tell the agent)
 
 - "Open https://example.com with the browser and give me the page text"

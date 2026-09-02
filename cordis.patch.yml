@@ -1,9 +1,15 @@
 # playwright-browser bundle layer — applied on top of a dsh profile's composition.
 #
-# One row: the host plugin registering the browser_* model tools. It requires
-# playwright-core directly (this is a normal Node module, unlike a dynamic
-# plugin), launches Chromium in-process, and owns the browser lifecycle via
-# ctx.effect.
+# Two rows:
+#   - playwright-browser: the host plugin registering the browser_* model
+#     tools. It requires playwright-core directly (this is a normal Node
+#     module, unlike a dynamic plugin), launches Chromium in-process, and owns
+#     the browser lifecycle via ctx.effect.
+#   - playwright-browser-tips: the bundled skill provider (injects `skills`),
+#     so agents can load the site-tips playbook on demand. Needs a profile
+#     with the skill registry — every base-backed profile has one.
 - insert:
     - id: playwright-browser
       name: playwright-browser
+    - id: playwright-browser-tips
+      name: playwright-browser/skill-provider
