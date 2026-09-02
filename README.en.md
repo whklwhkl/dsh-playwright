@@ -1,6 +1,11 @@
 # playwright-browser
 
+[![Release](https://img.shields.io/github/v/release/whklwhkl/dsh-playwright)](https://github.com/whklwhkl/dsh-playwright/releases)
+[![License: MIT](https://img.shields.io/github/license/whklwhkl/dsh-playwright)](./LICENSE)
+
 Browser automation plugin for DSH (DeepSeek Harness): gives agents a set of `browser_*` model tools that drive a real Chromium via Playwright — open pages, click, fill forms, extract the DOM, take screenshots.
+
+> Compatibility: tested against [dsh 0.1.2-alpha.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.5).
 
 - Requires `playwright-core` directly inside the host process — no external bridge service or ports
 - The browser launches lazily on first use and is closed automatically when the plugin is unloaded

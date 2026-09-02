@@ -1,6 +1,11 @@
 # playwright-browser
 
+[![Release](https://img.shields.io/github/v/release/whklwhkl/dsh-playwright)](https://github.com/whklwhkl/dsh-playwright/releases)
+[![License: MIT](https://img.shields.io/github/license/whklwhkl/dsh-playwright)](./LICENSE)
+
 DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `browser_*` 模型工具，用 Playwright 驱动 Chromium 真实操作网页——打开页面、点击、填表、抓取 DOM、截图。
+
+> 兼容性：对 [dsh 0.1.2-alpha.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.5) 实测通过。
 
 - 宿主进程内直接 `require('playwright-core')`，无需外部桥服务或端口
 - 浏览器按需懒启动，插件卸载时自动关闭
