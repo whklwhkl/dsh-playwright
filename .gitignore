@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# npm local cache (used when ~/.npm is unwritable)
+.npm-cache/
+
+# runtime artifacts
+shots/
+*.log
+
+# misc
+.DS_Store
