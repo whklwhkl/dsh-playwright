@@ -11,6 +11,7 @@ Consult this map before automating a web task: site facts and tactics are mainta
 - Selector failed or element invisible: inspect the DOM with `browser_eval` first, then pick a selector from the actual structure.
 - Empty extract: wait about 1 second or scroll the page, then extract once more.
 - After each navigation, confirm the current URL and title with `browser_status` before acting.
+- If `browser_status` says it is attached to your running browser: `browser_open` navigates the **currently tracked tab**. Check `browser_tabs` first and switch to the page you want (or pin one with `PW_CDP_PAGE`) instead of overwriting a page the user is reading; and don't expect `browser_close` to close that browser — it only disconnects.
 
 ## Boundary
 

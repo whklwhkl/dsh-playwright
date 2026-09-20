@@ -7,8 +7,9 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 
 > 兼容性：对 [dsh 0.1.2-alpha.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.5) 实测通过。
 
-- 宿主进程内直接 `require('playwright-core')`，无需外部桥服务或端口
+- 宿主进程内直接 `require('playwright-core')`，自建模式下无需外部桥服务或端口
 - 浏览器按需懒启动，插件卸载时自动关闭
+- 可选**挂载已经打开的浏览器**（CDP attach）：直接接管你正在用的 Chrome/Edge，登录态、Cookie、扩展、已开标签页全都在（见下文）
 - 只依赖 `playwright-core`，无其他运行时依赖
 - 工具描述/参数文档/输出文案支持中英双语（`PW_LANG=en` 切换，默认中文）— [English README](./README.en.md)
 
@@ -17,7 +18,8 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | 工具 | 作用 |
 |---|---|
 | `browser_open` | 打开 URL，返回最终地址与页面标题 |
-| `browser_status` | 查询浏览器/当前页面状态（URL、标题） |
+| `browser_status` | 查询浏览器/当前页面状态（是否挂载、URL、标题、标签页数） |
+| `browser_tabs` | 列出/切换/关闭已打开的标签页（挂载模式下的"接手"入口） |
 | `browser_click` | 点击元素（CSS 或 `text=` 选择器） |
 | `browser_type` | 逐字输入（可设 `delay` 模拟真人） |
 | `browser_fill` | 快速填充输入框 |
@@ -27,7 +29,7 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | `browser_html` | 抓取页面或指定元素的 HTML |
 | `browser_eval` | 在页面上下文执行 JS 表达式（诊断 DOM 等） |
 | `browser_screenshot` | 截图保存为 PNG，返回绝对路径 |
-| `browser_close` | 关闭浏览器释放资源 |
+| `browser_close` | 关闭浏览器释放资源（挂载模式下只断开连接） |
 
 ## 安装到 DSH profile
 
@@ -76,14 +78,51 @@ export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 > 版本提示：自动发现依赖 playwright-core 与其期望的 Chromium build 号匹配（`npx playwright-core install chromium` 总是安装匹配版本）。用 `PW_CHROMIUM_PATH` 指向任意 Chromium 系浏览器则无版本要求。
 
+### 方式 C：挂载已经打开的浏览器（复用登录态）
+
+上面 A/B 两种方式都是让插件**新起**一个干净浏览器——没有登录态、没有扩展、没有你手动打开的标签页。若要让智能体直接在你**正在使用的** Chrome 里干活，用挂载模式：
+
+```bash
+export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
+# 或 export PW_CDP_ENDPOINT=http://127.0.0.1:9222   # 指定调试端口
+# 或 export PW_CDP_ENDPOINT=auto      # 先试 chrome，再试 9222
+```
+
+`chrome` 这个取法要求你在目标浏览器里开启一次远程调试开关（Chrome 136+ 的安全策略，默认关闭）：
+
+1. 地址栏打开 `chrome://inspect/#remote-debugging`
+2. 勾选 **Allow remote debugging for this browser instance**
+
+之后插件即可挂载你的默认 profile：Cookie、登录态、扩展、已打开的标签页全都在。
+
+想改用端口方式（`http://127.0.0.1:9222`）时注意：Chrome 136 起 `--remote-debugging-port` 对**默认数据目录**不再生效，必须同时指定一个专属目录，并且该 Chrome 需先完全退出：
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug"
+```
+
+挂载模式的行为约定：
+
+- `browser_status` 会顺带建立连接，先告诉你连上了哪个页面、共几个标签页；
+- `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
+- `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
+- `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭）；
+- `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
+- 该模式下 `PW_HEADLESS`、`PW_CHROMIUM_PATH` 无效（浏览器是你自己起的）。
+
+> 与 [webclaw3](https://github.com/fatmind/webclaw3) 的区别：webclaw3 走 Chrome 扩展桥接 + 本地服务，本插件走 Playwright 原生 CDP 挂载，不需要装扩展；代价是 CDP 看不到 `chrome://` 等特权页面（扩展桥接可以）。
+
 ## 配置（环境变量）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PW_LANG` | `zh` | 设为 `en` 切换工具描述与输出为英文 |
 | `PW_CHROMIUM_PATH` | 自动发现 | 复用指定浏览器可执行文件 |
-| `PW_HEADLESS` | `true` | 设为 `false` 弹出可见窗口 |
+| `PW_HEADLESS` | `true` | 设为 `false` 弹出可见窗口（挂载模式下无效） |
 | `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
+| `PW_CDP_ENDPOINT` | 未设置 | 设置后进入挂载模式：`chrome` / `msedge` 等 channel 名、`http://127.0.0.1:9222`、`ws://…`，逗号分隔可做回退，`auto` = 先 chrome 再 9222 |
+| `PW_CDP_PAGE` | 未设置 | 挂载时按 URL 或标题**子串**挑选要接手的标签页 |
 
 ## 内置 skill：playwright-browser-tips
 
@@ -98,6 +137,8 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 - "用浏览器打开 https://example.com，抓取正文给我"
 - "打开百度，搜索「playwright」，把第一条结果标题告诉我"
 - "打开这个页面 https://…，点击「登录」，截个图"
+- "挂上我的 Chrome，把当前标签页的正文抓下来"（需 `PW_CDP_ENDPOINT`）
+- "看看我浏览器里都开了哪些标签页，切到那个 XXX 页面然后点登录"（需 `PW_CDP_ENDPOINT`）
 
 ## 故障排查
 
@@ -105,6 +146,9 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 |---|---|
 | `Executable doesn't exist ... ms-playwright` | 浏览器未下载，执行 `npx playwright-core install chromium` |
 | 下载 Chromium 时连接中断/超时（代理环境常见） | 大文件经代理易被中断；改用方式 B 的 `PW_CHROMIUM_PATH` 指向系统 Chrome，免下载 |
+| `Could not connect to chrome: DevToolsActivePort file not found` | 挂载模式没找到调试端点：去 `chrome://inspect/#remote-debugging` 勾选允许远程调试，或改用 `PW_CDP_ENDPOINT=http://127.0.0.1:9222` 并以专属 `--user-data-dir` 启动 Chrome |
+| `connect ECONNREFUSED 127.0.0.1:9222` | 目标浏览器没起来或端口不对：确认它带 `--remote-debugging-port=9222` 启动，且 `curl http://127.0.0.1:9222/json/version` 有返回 |
+| 挂载模式下 `browser_open` 覆盖了我正在看的页面 | 正常现象——它导航的是"当前跟踪的标签页"；先 `browser_tabs` 切到目标页，或用 `PW_CDP_PAGE` 固定 |
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
 | 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |
 | 元素"not visible" | 页面改版或选择器过时，用 `browser_eval` 检查 DOM 再选选择器 |
@@ -119,6 +163,18 @@ import { apply } from './lib/index.js'
 const tools = []
 apply({ tools: { register: (d) => tools.push(d) }, effect: () => () => {} })
 console.log(tools.map((t) => t.name).join('\n'))
+"
+
+# 挂载模式冒烟测试（另开一个终端，先按"方式 C"起好可调试的 Chrome）：
+PW_CDP_ENDPOINT=http://127.0.0.1:9222 node --input-type=module -e "
+process.env.PW_CDP_ENDPOINT ||= 'http://127.0.0.1:9222'
+const { apply } = await import('./lib/index.js')
+const m = new Map()
+apply({ tools: { register: (d) => m.set(d.name, d) }, effect: () => () => {} })
+const call = (n, a = {}) => m.get('browser_' + n).execute(a)
+console.log(await call('status'))   // 应显示"已挂载你正在使用的浏览器"
+console.log(await call('tabs'))     // 列出现有标签页
+console.log(await call('close'))    // 只断开连接：Chrome 应仍在运行
 "
 ```
 
