@@ -18,7 +18,8 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | 工具 | 作用 |
 |---|---|
 | `browser_open` | 打开 URL，返回最终地址与页面标题 |
-| `browser_status` | 查询浏览器/当前页面状态（是否挂载、URL、标题、标签页数） |
+| `browser_status` | 查询浏览器/当前页面状态（是否挂载、端点、URL、标题、标签页数） |
+| `browser_attach` | 运行时挂载/切换到一个已在运行的浏览器（无需重启 DSH） |
 | `browser_tabs` | 列出/切换/关闭已打开的标签页（挂载模式下的"接手"入口） |
 | `browser_click` | 点击元素（CSS 或 `text=` 选择器） |
 | `browser_type` | 逐字输入（可设 `delay` 模拟真人） |
@@ -102,13 +103,25 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
   --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug"
 ```
 
+> 两种取法不能混用（实测）：用 `chrome://inspect` 开关启动的浏览器**只提供 WebSocket 端点，不响应 HTTP 发现接口**（`http://127.0.0.1:9222/json/version` 返回 404），所以对这类实例只能写 channel 名 `chrome`；反过来，用 `--remote-debugging-port` 起的实例两种写法都行。
+
+**不想重启 DSH 也能挂载：** 直接让智能体调用 `browser_attach`（也可以自己说"挂上我的 Chrome"）。它接受与 `PW_CDP_ENDPOINT` 相同的写法，并且：
+
+| 调用 | 作用 |
+|---|---|
+| `browser_attach` | 缺省端点：已挂载就保持当前端点，否则用 `PW_CDP_ENDPOINT`（未设置则 `auto`） |
+| `browser_attach({ endpoint: "chrome" })` | 挂到该端点（channel 名 / `http://…` / `ws://…` / `auto` / 逗号分隔回退） |
+| `browser_attach({ page: "portal" })` | 不换浏览器，只按 URL/标题子串换要接手的标签页；命中不到会报错 |
+| `browser_attach({ endpoint: "launch" })` | 不再挂载，切回插件自建的干净浏览器（忽略环境变量） |
+
 挂载模式的行为约定：
 
-- `browser_status` 会顺带建立连接，先告诉你连上了哪个页面、共几个标签页；
+- `browser_status` 会顺带建立连接，先告诉你连上了哪个端点、哪个页面、共几个标签页；
 - `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
 - `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
 - `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭）；
 - `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
+- 端点连不上时会在 `PW_CDP_TIMEOUT`（默认 15 秒）内快速失败并列出试过的端点，不会把一次工具调用挂死；
 - 该模式下 `PW_HEADLESS`、`PW_CHROMIUM_PATH` 无效（浏览器是你自己起的）。
 
 > 与 [webclaw3](https://github.com/fatmind/webclaw3) 的区别：webclaw3 走 Chrome 扩展桥接 + 本地服务，本插件走 Playwright 原生 CDP 挂载，不需要装扩展；代价是 CDP 看不到 `chrome://` 等特权页面（扩展桥接可以）。
@@ -123,6 +136,7 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 | `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
 | `PW_CDP_ENDPOINT` | 未设置 | 设置后进入挂载模式：`chrome` / `msedge` 等 channel 名、`http://127.0.0.1:9222`、`ws://…`，逗号分隔可做回退，`auto` = 先 chrome 再 9222 |
 | `PW_CDP_PAGE` | 未设置 | 挂载时按 URL 或标题**子串**挑选要接手的标签页 |
+| `PW_CDP_TIMEOUT` | `15000` | 挂载连接超时毫秒；端点写错时据此快速失败 |
 
 ## 内置 skill：playwright-browser-tips
 
@@ -137,8 +151,8 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 - "用浏览器打开 https://example.com，抓取正文给我"
 - "打开百度，搜索「playwright」，把第一条结果标题告诉我"
 - "打开这个页面 https://…，点击「登录」，截个图"
-- "挂上我的 Chrome，把当前标签页的正文抓下来"（需 `PW_CDP_ENDPOINT`）
-- "看看我浏览器里都开了哪些标签页，切到那个 XXX 页面然后点登录"（需 `PW_CDP_ENDPOINT`）
+- "挂上我的 Chrome，把当前标签页的正文抓下来"（智能体调用 `browser_attach`，或设 `PW_CDP_ENDPOINT`）
+- "看看我浏览器里都开了哪些标签页，切到那个 XXX 页面然后点登录"（同上）
 
 ## 故障排查
 
@@ -146,8 +160,10 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 |---|---|
 | `Executable doesn't exist ... ms-playwright` | 浏览器未下载，执行 `npx playwright-core install chromium` |
 | 下载 Chromium 时连接中断/超时（代理环境常见） | 大文件经代理易被中断；改用方式 B 的 `PW_CHROMIUM_PATH` 指向系统 Chrome，免下载 |
-| `Could not connect to chrome: DevToolsActivePort file not found` | 挂载模式没找到调试端点：去 `chrome://inspect/#remote-debugging` 勾选允许远程调试，或改用 `PW_CDP_ENDPOINT=http://127.0.0.1:9222` 并以专属 `--user-data-dir` 启动 Chrome |
+| `Could not connect to chrome: DevToolsActivePort file not found` | 目标浏览器没开远程调试：去 `chrome://inspect/#remote-debugging` 勾选允许，或改用 `PW_CDP_ENDPOINT=http://127.0.0.1:9222` 并以专属 `--user-data-dir` 启动 Chrome |
+| `http://127.0.0.1:9222` 报 `Unexpected status 404 ... /json/version/` | 该端口上的浏览器是用 `chrome://inspect` 开关开的：它不提供 HTTP 发现接口，改用 channel 名 `chrome`（或 `browser_attach({endpoint:"chrome"})`） |
 | `connect ECONNREFUSED 127.0.0.1:9222` | 目标浏览器没起来或端口不对：确认它带 `--remote-debugging-port=9222` 启动，且 `curl http://127.0.0.1:9222/json/version` 有返回 |
+| `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出每个端点失败的原因，15 秒内返回，不会挂住 |
 | 挂载模式下 `browser_open` 覆盖了我正在看的页面 | 正常现象——它导航的是"当前跟踪的标签页"；先 `browser_tabs` 切到目标页，或用 `PW_CDP_PAGE` 固定 |
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
 | 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |
@@ -166,15 +182,17 @@ console.log(tools.map((t) => t.name).join('\n'))
 "
 
 # 挂载模式冒烟测试（另开一个终端，先按"方式 C"起好可调试的 Chrome）：
-PW_CDP_ENDPOINT=http://127.0.0.1:9222 node --input-type=module -e "
-process.env.PW_CDP_ENDPOINT ||= 'http://127.0.0.1:9222'
+# 不设 PW_CDP_ENDPOINT 也行——browser_attach 可以运行时指定端点
+node --input-type=module -e "
 const { apply } = await import('./lib/index.js')
 const m = new Map()
 apply({ tools: { register: (d) => m.set(d.name, d) }, effect: () => () => {} })
 const call = (n, a = {}) => m.get('browser_' + n).execute(a)
-console.log(await call('status'))   // 应显示"已挂载你正在使用的浏览器"
-console.log(await call('tabs'))     // 列出现有标签页
-console.log(await call('close'))    // 只断开连接：Chrome 应仍在运行
+console.log(await call('attach', { endpoint: 'http://127.0.0.1:9222' }))  // 挂载
+console.log(await call('tabs'))                                          // 列出现有标签页
+console.log(await call('attach', { endpoint: 'launch' }))                // 切回自建实例
+console.log(await call('open', { url: 'https://example.com' }))
+console.log(await call('close'))                                         // 关闭自建实例
 "
 ```
 

@@ -12,6 +12,7 @@
 - 抓取为空：等待约 1 秒或滚动页面后再抓一次。
 - 每次导航后用 `browser_status` 确认当前 URL 和标题，再执行后续动作。
 - 若 `browser_status` 显示"已挂载你正在使用的浏览器"：`browser_open` 会在**当前跟踪的标签页**里导航。动手前先用 `browser_tabs` 看清有哪些标签页，切到目标页（或用 `PW_CDP_PAGE` 固定），别覆盖用户正在看的页面；收尾时也不要指望 `browser_close` 关掉浏览器，它只断开连接。
+- 任务需要登录态而当前是插件自建的空浏览器：可调用 `browser_attach` 挂到用户正在用的浏览器（用户需先在 `chrome://inspect/#remote-debugging` 勾选允许远程调试）；用完可 `browser_attach({endpoint:"launch"})` 切回自建实例。
 
 ## 边界
 

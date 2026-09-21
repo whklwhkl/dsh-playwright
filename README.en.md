@@ -19,7 +19,8 @@ Language: tool descriptions, parameter docs and result text are bilingual. Set `
 | Tool | What it does |
 |---|---|
 | `browser_open` | Open a URL; returns the final address and page title |
-| `browser_status` | Query browser / current page state (attach mode, URL, title, tab count) |
+| `browser_status` | Query browser / current page state (attach mode, endpoint, URL, title, tab count) |
+| `browser_attach` | Attach to / switch to an already-running browser at runtime (no DSH restart) |
 | `browser_tabs` | List / switch / close open tabs (how the agent takes over your page in attach mode) |
 | `browser_click` | Click an element (CSS or `text=` selector) |
 | `browser_type` | Type text character by character (optional `delay`) |
@@ -105,12 +106,24 @@ For the port form (`http://127.0.0.1:9222`) note that since Chrome 136 `--remote
 
 Attach-mode contract:
 
-- `browser_status` connects on demand and tells you which page and how many tabs you got;
+- `browser_status` connects on demand and tells you which endpoint and page you got, plus the tab count;
 - `browser_tabs` lists every tab (`*` = current one); pass `index` or a `url` substring to switch to it (and bring it to front), add `close:true` to close it;
 - `browser_open` navigates **the currently tracked tab** — don't point it at a page you want to keep; call `browser_tabs` first;
 - `browser_close` **only disconnects and never closes your browser** (only a plugin-launched instance is really closed);
 - `PW_CDP_PAGE` pins the tab to take over, by URL/title substring;
+- an unreachable endpoint fails within `PW_CDP_TIMEOUT` (default 15s) listing every endpoint it tried, instead of hanging the tool call;
 - `PW_HEADLESS` and `PW_CHROMIUM_PATH` do not apply (you started that browser yourself).
+
+> The two forms are not interchangeable (measured): a browser debugged through the `chrome://inspect` toggle serves **only the WebSocket endpoint and does not answer the HTTP discovery API** (`http://127.0.0.1:9222/json/version` returns 404), so such an instance must be addressed by channel name `chrome`; a browser started with `--remote-debugging-port` accepts either form.
+
+**Attach without restarting DSH:** have the agent call `browser_attach` (or just say "attach to my Chrome"). It takes the same values as `PW_CDP_ENDPOINT`:
+
+| Call | Effect |
+|---|---|
+| `browser_attach` | Default endpoint: stays on the current one if already attached, else `PW_CDP_ENDPOINT` (`auto` when unset) |
+| `browser_attach({ endpoint: "chrome" })` | Attach to that endpoint (channel name / `http://…` / `ws://…` / `auto` / comma-separated fallbacks) |
+| `browser_attach({ page: "portal" })` | Keep the browser, just switch the tracked tab by URL/title substring; a miss is an error |
+| `browser_attach({ endpoint: "launch" })` | Stop attaching and go back to a plugin-launched browser (ignores the env var) |
 
 > Difference from [webclaw3](https://github.com/fatmind/webclaw3): webclaw3 bridges through a Chrome extension plus a local service; this plugin attaches natively over CDP, so no extension is needed. The trade-off is that CDP cannot see privileged pages such as `chrome://…` (the extension bridge can).
 
@@ -124,6 +137,7 @@ Attach-mode contract:
 | `PW_SHOT_DIR` | `shots/` under the plugin dir | Directory for screenshots |
 | `PW_CDP_ENDPOINT` | unset | Set to enable attach mode: a channel name (`chrome`, `msedge`, …), `http://127.0.0.1:9222`, `ws://…`; comma-separate for fallbacks, or `auto` (= chrome, then 9222) |
 | `PW_CDP_PAGE` | unset | On attach, pick the tab to drive by URL or title **substring** |
+| `PW_CDP_TIMEOUT` | `15000` | Attach connect timeout in ms; a wrong endpoint fails fast |
 
 ## Bundled skill: playwright-browser-tips
 
@@ -138,8 +152,8 @@ The skill needs a profile with the skill registry — every `dsh-base`-backed pr
 - "Open https://example.com with the browser and give me the page text"
 - "Open Baidu, search for 'playwright', and tell me the first result title"
 - "Open https://…, click 'Sign in', and take a screenshot"
-- "Attach to my Chrome and extract the text of the current tab" (needs `PW_CDP_ENDPOINT`)
-- "List the tabs in my browser, switch to the XXX page, then click Sign in" (needs `PW_CDP_ENDPOINT`)
+- "Attach to my Chrome and extract the text of the current tab" (the agent calls `browser_attach`, or set `PW_CDP_ENDPOINT`)
+- "List the tabs in my browser, switch to the XXX page, then click Sign in" (same)
 
 ## Troubleshooting
 
@@ -147,8 +161,10 @@ The skill needs a profile with the skill registry — every `dsh-base`-backed pr
 |---|---|
 | `Executable doesn't exist ... ms-playwright` | Browser not downloaded; run `npx playwright-core install chromium` |
 | Chromium download drops / times out (common behind proxies) | Large transfers through a proxy are prone to interruption; use Option B's `PW_CHROMIUM_PATH` pointing at a system Chrome instead |
-| `Could not connect to chrome: DevToolsActivePort file not found` | Attach mode found no debug endpoint: enable remote debugging at `chrome://inspect/#remote-debugging`, or switch to `PW_CDP_ENDPOINT=http://127.0.0.1:9222` and start Chrome with a dedicated `--user-data-dir` |
+| `Could not connect to chrome: DevToolsActivePort file not found` | The target browser has debugging off: enable it at `chrome://inspect/#remote-debugging`, or switch to `PW_CDP_ENDPOINT=http://127.0.0.1:9222` and start Chrome with a dedicated `--user-data-dir` |
+| `http://127.0.0.1:9222` fails with `Unexpected status 404 ... /json/version/` | The browser on that port was enabled via the `chrome://inspect` toggle: it serves no HTTP discovery API; address it by channel name `chrome` instead (or `browser_attach({endpoint:"chrome"})`) |
 | `connect ECONNREFUSED 127.0.0.1:9222` | The target browser isn't running or the port is wrong: confirm it started with `--remote-debugging-port=9222` and that `curl http://127.0.0.1:9222/json/version` answers |
+| `CDP attach failed (tried N endpoint(s))` | Wrong endpoint or debugging is off; the message lists the reason per endpoint and returns within 15s instead of hanging |
 | In attach mode `browser_open` overwrote the page I was reading | Expected — it navigates the currently tracked tab; call `browser_tabs` first, or pin a tab with `PW_CDP_PAGE` |
 | `net::ERR_CONNECTION_CLOSED` | Network issue or anti-bot on the target site; try another site / retry later |
 | CAPTCHA popup (e.g. Baidu slider), input box invisible under headless | Anti-automation, not a plugin problem; Bing worked end to end in testing — prefer Bing, or set `PW_HEADLESS=false` for headed mode |
@@ -166,16 +182,18 @@ apply({ tools: { register: (d) => tools.push(d) }, effect: () => () => {} })
 console.log(tools.map((t) => t.name).join('\n'))
 "
 
-# attach-mode smoke test (start a debuggable Chrome per Option C first):
-PW_CDP_ENDPOINT=http://127.0.0.1:9222 node --input-type=module -e "
-process.env.PW_CDP_ENDPOINT ||= 'http://127.0.0.1:9222'
+# attach-mode smoke test (start a debuggable Chrome per Option C first);
+# no PW_CDP_ENDPOINT needed — browser_attach takes the endpoint at runtime
+node --input-type=module -e "
 const { apply } = await import('./lib/index.js')
 const m = new Map()
 apply({ tools: { register: (d) => m.set(d.name, d) }, effect: () => () => {} })
 const call = (n, a = {}) => m.get('browser_' + n).execute(a)
-console.log(await call('status'))   // should say it attached to your running browser
-console.log(await call('tabs'))     // lists your existing tabs
-console.log(await call('close'))    // disconnect only: Chrome must still be running
+console.log(await call('attach', { endpoint: 'http://127.0.0.1:9222' }))  // attach
+console.log(await call('tabs'))                                          // list existing tabs
+console.log(await call('attach', { endpoint: 'launch' }))                // back to our own browser
+console.log(await call('open', { url: 'https://example.com' }))
+console.log(await call('close'))                                         // closes our own instance
 "
 ```
 
