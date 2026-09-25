@@ -96,6 +96,9 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 
 之后插件即可挂载你的默认 profile：Cookie、登录态、扩展、已打开的标签页全都在。
 
+> ⚠️ **每次新建 CDP 连接，Chrome 都会弹一次「要允许远程调试吗？」**（实测 Chrome 153，这是 `chrome://inspect` 开关的激进安全策略，无法配置成"记住授权"）。在你点「允许」之前，WebSocket 升级握手一直被**静默挂起**，所以表现就像"连不上/无缘无故超时"。
+> 因此：**第一次挂载请留意 Chrome 窗口，点一次「允许」**；之后插件会复用这一条连接，不再弹框（`browser_attach` 同一端点、`browser_tabs`、`browser_open` 等都不会重新建连）。`browser_close`/插件重载会断开，下次挂载需要再点一次。
+
 想改用端口方式（`http://127.0.0.1:9222`）时注意：Chrome 136 起 `--remote-debugging-port` 对**默认数据目录**不再生效，必须同时指定一个专属目录，并且该 Chrome 需先完全退出：
 
 ```bash
@@ -103,7 +106,10 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
   --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug"
 ```
 
+> 这条路子**完全不弹授权框**（不走 `chrome://inspect` 开关），`/json/version` 也正常，代价是那个专属目录是新的：需要在那里登录一次你要用的站点。适合无人值守/长期自动化；想直接用现有登录态就用上面的 channel 名 `chrome`。
+
 > 两种取法不能混用（实测）：用 `chrome://inspect` 开关启动的浏览器**只提供 WebSocket 端点，不响应 HTTP 发现接口**（`http://127.0.0.1:9222/json/version` 返回 404），所以对这类实例只能写 channel 名 `chrome`；反过来，用 `--remote-debugging-port` 起的实例两种写法都行。
+> 插件现在自己读 `DevToolsActivePort`（第 1 行端口 + 第 2 行 GUID 路径）来解析 `chrome`，**不再走 Playwright 内置的 channel 解析**——后者只取端口、丢掉 GUID 路径，在 Chrome 153 上必然连不上。
 
 **不想重启 DSH 也能挂载：** 直接让智能体调用 `browser_attach`（也可以自己说"挂上我的 Chrome"）。它接受与 `PW_CDP_ENDPOINT` 相同的写法，并且：
 
@@ -116,12 +122,14 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 
 挂载模式的行为约定：
 
-- `browser_status` 会顺带建立连接，先告诉你连上了哪个端点、哪个页面、共几个标签页；
+- `browser_status` **不会**主动建立连接（一条新连接 = 一次授权弹窗，只读查询不值得让用户点框）；未挂载时它会告诉你去调 `browser_attach`；
+- 同一端点上重复 `browser_attach` 会**复用现有连接**（只按 `page` 子串重选标签页），不会断开重连、不会又弹一个授权框；
 - `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
 - `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
 - `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭）；
 - `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
-- 端点连不上时会在 `PW_CDP_TIMEOUT`（默认 15 秒）内快速失败并列出试过的端点，不会把一次工具调用挂死；
+- 挂载失败时会打印诊断：端口是否在监听、`/json/version` 的 HTTP 状态、`DevToolsActivePort` 内容；若是"端口在监听但握手没完成"，会明确提示你去 Chrome 点「允许远程调试」；
+- 连接预算由 `PW_CDP_TIMEOUT` 控制（默认 90 秒，留够看到弹窗并点一下的时间）；端口无人监听时仍然毫秒级快速失败，不会白等；
 - 该模式下 `PW_HEADLESS`、`PW_CHROMIUM_PATH` 无效（浏览器是你自己起的）。
 
 > 与 [webclaw3](https://github.com/fatmind/webclaw3) 的区别：webclaw3 走 Chrome 扩展桥接 + 本地服务，本插件走 Playwright 原生 CDP 挂载，不需要装扩展；代价是 CDP 看不到 `chrome://` 等特权页面（扩展桥接可以）。
@@ -136,7 +144,7 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 | `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
 | `PW_CDP_ENDPOINT` | 未设置 | 设置后进入挂载模式：`chrome` / `msedge` 等 channel 名、`http://127.0.0.1:9222`、`ws://…`，逗号分隔可做回退，`auto` = 先 chrome 再 9222 |
 | `PW_CDP_PAGE` | 未设置 | 挂载时按 URL 或标题**子串**挑选要接手的标签页 |
-| `PW_CDP_TIMEOUT` | `15000` | 挂载连接超时毫秒；端点写错时据此快速失败 |
+| `PW_CDP_TIMEOUT` | `90000` | 挂载连接预算毫秒。它同时是"等你在授权框上点允许"的窗口；端口无人监听时仍毫秒级快速失败 |
 
 ## 内置 skill：playwright-browser-tips
 
@@ -163,7 +171,9 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 | `Could not connect to chrome: DevToolsActivePort file not found` | 目标浏览器没开远程调试：去 `chrome://inspect/#remote-debugging` 勾选允许，或改用 `PW_CDP_ENDPOINT=http://127.0.0.1:9222` 并以专属 `--user-data-dir` 启动 Chrome |
 | `http://127.0.0.1:9222` 报 `Unexpected status 404 ... /json/version/` | 该端口上的浏览器是用 `chrome://inspect` 开关开的：它不提供 HTTP 发现接口，改用 channel 名 `chrome`（或 `browser_attach({endpoint:"chrome"})`） |
 | `connect ECONNREFUSED 127.0.0.1:9222` | 目标浏览器没起来或端口不对：确认它带 `--remote-debugging-port=9222` 启动，且 `curl http://127.0.0.1:9222/json/version` 有返回 |
-| `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出每个端点失败的原因，15 秒内返回，不会挂住 |
+| `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出失败原因 + 端口是否在监听 + `/json/version` 状态 + `DevToolsActivePort` 内容，不用手工摸排 |
+| 挂载报 `Timeout ... exceeded`，同时提示"端口在监听但 WS 握手一直没完成" | **Chrome 在等你点授权框**：切到 Chrome 窗口点「允许远程调试」的「允许」，再调一次 `browser_attach`。框没看到就翻一下其他窗口/最小化的 Chrome；点得慢就把 `PW_CDP_TIMEOUT` 调大 |
+| 每调一次 `browser_attach` 都弹一次授权框 | 说明中间断开过（`browser_close`、插件重载、DSH 重启）。同一端点上重复 `browser_attach` 现在会复用连接；想彻底摆脱弹框就改用专属 `--user-data-dir` 的端口方式（见方式 C） |
 | 挂载模式下 `browser_open` 覆盖了我正在看的页面 | 正常现象——它导航的是"当前跟踪的标签页"；先 `browser_tabs` 切到目标页，或用 `PW_CDP_PAGE` 固定 |
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
 | 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |

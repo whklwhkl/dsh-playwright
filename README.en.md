@@ -97,6 +97,9 @@ The `chrome` form requires a one-time opt-in in the target browser (a Chrome 136
 
 The plugin then attaches to your default profile: cookies, sessions, extensions and open tabs all included.
 
+> ⚠️ **Chrome asks "Allow remote debugging?" for EVERY new CDP connection** (measured on Chrome 153; it is the aggressive security policy of the `chrome://inspect` toggle and cannot be configured to remember the answer). Until you click Allow, the WebSocket upgrade handshake is **silently parked**, which looks exactly like "cannot connect / unexplained timeout".
+> So: **for the first attach, watch the Chrome window and click Allow once**. Afterwards the plugin reuses that single connection — a repeated `browser_attach` on the same endpoint, `browser_tabs`, `browser_open` and friends never reconnect. `browser_close`, a plugin reload or a DSH restart drop it, and you approve once again next time.
+
 For the port form (`http://127.0.0.1:9222`) note that since Chrome 136 `--remote-debugging-port` is ignored for the **default data directory**: you must also pass a dedicated directory, and that Chrome has to be fully quit first:
 
 ```bash
@@ -104,17 +107,22 @@ For the port form (`http://127.0.0.1:9222`) note that since Chrome 136 `--remote
   --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug"
 ```
 
+> This path **never shows the consent dialog** (it does not go through the `chrome://inspect` toggle) and `/json/version` answers normally. The trade-off is that the dedicated directory is new: log in once to the sites you need there. Best for unattended / long-running automation; use channel name `chrome` when you want your existing sessions.
+
 Attach-mode contract:
 
-- `browser_status` connects on demand and tells you which endpoint and page you got, plus the tab count;
+- `browser_status` does **not** connect (a new connection means another consent dialog); when not attached it tells you to call `browser_attach`;
+- a repeated `browser_attach` on the same endpoint **reuses the live connection** (it only re-picks the tab by `page` substring) instead of disconnecting and asking you to approve again;
 - `browser_tabs` lists every tab (`*` = current one); pass `index` or a `url` substring to switch to it (and bring it to front), add `close:true` to close it;
 - `browser_open` navigates **the currently tracked tab** — don't point it at a page you want to keep; call `browser_tabs` first;
 - `browser_close` **only disconnects and never closes your browser** (only a plugin-launched instance is really closed);
 - `PW_CDP_PAGE` pins the tab to take over, by URL/title substring;
-- an unreachable endpoint fails within `PW_CDP_TIMEOUT` (default 15s) listing every endpoint it tried, instead of hanging the tool call;
+- a failed attach reports diagnostics — whether the port is listening, the `/json/version` HTTP status, the `DevToolsActivePort` contents — and when the port is listening but the handshake never completed it tells you to click Allow in Chrome;
+- the connect budget is `PW_CDP_TIMEOUT` (default 90s, enough to notice the dialog and click it); a port with nobody listening still fails in milliseconds;
 - `PW_HEADLESS` and `PW_CHROMIUM_PATH` do not apply (you started that browser yourself).
 
 > The two forms are not interchangeable (measured): a browser debugged through the `chrome://inspect` toggle serves **only the WebSocket endpoint and does not answer the HTTP discovery API** (`http://127.0.0.1:9222/json/version` returns 404), so such an instance must be addressed by channel name `chrome`; a browser started with `--remote-debugging-port` accepts either form.
+> The plugin now resolves the `chrome` channel itself by reading `DevToolsActivePort` (port on line 1, GUID path on line 2) instead of using Playwright's built-in channel resolution, which keeps only the port, drops the GUID path, and therefore cannot connect on Chrome 153.
 
 **Attach without restarting DSH:** have the agent call `browser_attach` (or just say "attach to my Chrome"). It takes the same values as `PW_CDP_ENDPOINT`:
 
@@ -137,7 +145,7 @@ Attach-mode contract:
 | `PW_SHOT_DIR` | `shots/` under the plugin dir | Directory for screenshots |
 | `PW_CDP_ENDPOINT` | unset | Set to enable attach mode: a channel name (`chrome`, `msedge`, …), `http://127.0.0.1:9222`, `ws://…`; comma-separate for fallbacks, or `auto` (= chrome, then 9222) |
 | `PW_CDP_PAGE` | unset | On attach, pick the tab to drive by URL or title **substring** |
-| `PW_CDP_TIMEOUT` | `15000` | Attach connect timeout in ms; a wrong endpoint fails fast |
+| `PW_CDP_TIMEOUT` | `90000` | Attach connect budget in ms. It doubles as the window for clicking Allow in Chrome's consent dialog; a port with nobody listening still fails in milliseconds |
 
 ## Bundled skill: playwright-browser-tips
 
@@ -164,7 +172,9 @@ The skill needs a profile with the skill registry — every `dsh-base`-backed pr
 | `Could not connect to chrome: DevToolsActivePort file not found` | The target browser has debugging off: enable it at `chrome://inspect/#remote-debugging`, or switch to `PW_CDP_ENDPOINT=http://127.0.0.1:9222` and start Chrome with a dedicated `--user-data-dir` |
 | `http://127.0.0.1:9222` fails with `Unexpected status 404 ... /json/version/` | The browser on that port was enabled via the `chrome://inspect` toggle: it serves no HTTP discovery API; address it by channel name `chrome` instead (or `browser_attach({endpoint:"chrome"})`) |
 | `connect ECONNREFUSED 127.0.0.1:9222` | The target browser isn't running or the port is wrong: confirm it started with `--remote-debugging-port=9222` and that `curl http://127.0.0.1:9222/json/version` answers |
-| `CDP attach failed (tried N endpoint(s))` | Wrong endpoint or debugging is off; the message lists the reason per endpoint and returns within 15s instead of hanging |
+| `CDP attach failed (tried N endpoint(s))` | Wrong endpoint or debugging is off; the message now lists per-endpoint reasons plus whether the port is listening, the `/json/version` status and the `DevToolsActivePort` contents |
+| Attach fails with `Timeout ... exceeded` plus "port is listening but the WebSocket handshake never completed" | **Chrome is waiting for you to approve**: switch to Chrome and click Allow in the "Allow remote debugging?" dialog, then call `browser_attach` again. If you cannot find the dialog, check other/minimized Chrome windows; raise `PW_CDP_TIMEOUT` if you need longer |
+| Every `browser_attach` pops the consent dialog again | Something disconnected in between (`browser_close`, plugin reload, DSH restart). A repeated `browser_attach` on the same endpoint now reuses the connection; to get rid of the dialog entirely use the port form with a dedicated `--user-data-dir` (see Option C) |
 | In attach mode `browser_open` overwrote the page I was reading | Expected — it navigates the currently tracked tab; call `browser_tabs` first, or pin a tab with `PW_CDP_PAGE` |
 | `net::ERR_CONNECTION_CLOSED` | Network issue or anti-bot on the target site; try another site / retry later |
 | CAPTCHA popup (e.g. Baidu slider), input box invisible under headless | Anti-automation, not a plugin problem; Bing worked end to end in testing — prefer Bing, or set `PW_HEADLESS=false` for headed mode |
