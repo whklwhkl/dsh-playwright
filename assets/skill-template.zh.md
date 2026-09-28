@@ -13,7 +13,8 @@
 - 每次导航后用 `browser_status` 确认当前 URL 和标题，再执行后续动作。
 - 若 `browser_status` 显示"已挂载你正在使用的浏览器"：`browser_open` 会在**当前跟踪的标签页**里导航。动手前先用 `browser_tabs` 看清有哪些标签页，切到目标页（或用 `PW_CDP_PAGE` 固定），别覆盖用户正在看的页面；收尾时也不要指望 `browser_close` 关掉浏览器，它只断开连接。
 - 任务需要登录态而当前是插件自建的空浏览器：可调用 `browser_attach` 挂到用户正在用的浏览器（用户需先在 `chrome://inspect/#remote-debugging` 勾选允许远程调试）；用完可 `browser_attach({endpoint:"launch"})` 切回自建实例。
-- 挂载报 `Timeout` 时先在回复里让用户去 Chrome 点「允许远程调试」的「允许」框：Chrome 136+ 对**每一条新 CDP 连接**都要授权，且握手会静默挂起（不是网络问题）。别反复重试 `browser_attach`（重试只会再弹一个框）；同一端点上第二次 `browser_attach` 会复用已有连接。只读的 `browser_status` 不会主动建连，未挂载时直接调 `browser_attach`。
+- 挂载报 `Timeout` 时先看清楚是哪种：提示"WS 握手一直没完成"= 让用户去 Chrome 点「允许远程调试」的「允许」（Chrome 136+ 对**每一条新 CDP 连接**都要授权，握手会静默挂起，不是网络问题）；提示"WS 握手已经完成，但初始化一直没结束"= 不是授权问题，而是某个标签的渲染进程不响应，让用户关掉那个卡住的标签页。别反复重试 `browser_attach`（重试只会再来一遍）；同一端点上第二次 `browser_attach` 会复用已有连接。只读的 `browser_status` 不会主动建连，未挂载时直接调 `browser_attach`。
+- `browser_tabs` / `browser_status` 里出现 `(无响应)`：那个标签的渲染进程卡死了（死循环、"页面无响应"、DevTools 里断点暂停），它的标题和页面操作都取不到。**不要**继续驱动它，换个标签页（`browser_tabs({index:...})`），并在回复里告知用户关掉它；只是 `(无标题)` 则没关系，说明页面本身没标题。
 
 ## 边界
 

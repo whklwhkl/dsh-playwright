@@ -114,10 +114,11 @@ Attach-mode contract:
 - `browser_status` does **not** connect (a new connection means another consent dialog); when not attached it tells you to call `browser_attach`;
 - a repeated `browser_attach` on the same endpoint **reuses the live connection** (it only re-picks the tab by `page` substring) instead of disconnecting and asking you to approve again;
 - `browser_tabs` lists every tab (`*` = current one); pass `index` or a `url` substring to switch to it (and bring it to front), add `close:true` to close it;
+- incidental round-trips such as reading a title are **budgeted**: when a tab's renderer is stuck (infinite loop, Chrome's "Page unresponsive", a paused debugger) it is marked `(not responding)` and the call still returns within about `PW_RTT_TIMEOUT` ms instead of wedging the whole turn;
 - `browser_open` navigates **the currently tracked tab** — don't point it at a page you want to keep; call `browser_tabs` first;
 - `browser_close` **only disconnects and never closes your browser** (only a plugin-launched instance is really closed);
 - `PW_CDP_PAGE` pins the tab to take over, by URL/title substring;
-- a failed attach reports diagnostics — whether the port is listening, the `/json/version` HTTP status, the `DevToolsActivePort` contents — and when the port is listening but the handshake never completed it tells you to click Allow in Chrome;
+- a failed attach reports diagnostics — whether the port is listening, the `/json/version` HTTP status, the `DevToolsActivePort` contents — and distinguishes "the WebSocket handshake never completed" (= waiting for you to click Allow) from "the handshake completed but initialization never finished" (= a tab's renderer is not responding; the message lists the tabs to help you spot it);
 - the connect budget is `PW_CDP_TIMEOUT` (default 90s, enough to notice the dialog and click it); a port with nobody listening still fails in milliseconds;
 - `PW_HEADLESS` and `PW_CHROMIUM_PATH` do not apply (you started that browser yourself).
 
@@ -146,6 +147,7 @@ Attach-mode contract:
 | `PW_CDP_ENDPOINT` | unset | Set to enable attach mode: a channel name (`chrome`, `msedge`, …), `http://127.0.0.1:9222`, `ws://…`; comma-separate for fallbacks, or `auto` (= chrome, then 9222) |
 | `PW_CDP_PAGE` | unset | On attach, pick the tab to drive by URL or title **substring** |
 | `PW_CDP_TIMEOUT` | `90000` | Attach connect budget in ms. It doubles as the window for clicking Allow in Chrome's consent dialog; a port with nobody listening still fails in milliseconds |
+| `PW_RTT_TIMEOUT` | `1500` | Budget in ms for a single page round-trip (title, bring-to-front). It is what turns a stuck renderer into a fast `(not responding)` marker instead of a wedged call |
 
 ## Bundled skill: playwright-browser-tips
 
@@ -174,6 +176,9 @@ The skill needs a profile with the skill registry — every `dsh-base`-backed pr
 | `connect ECONNREFUSED 127.0.0.1:9222` | The target browser isn't running or the port is wrong: confirm it started with `--remote-debugging-port=9222` and that `curl http://127.0.0.1:9222/json/version` answers |
 | `CDP attach failed (tried N endpoint(s))` | Wrong endpoint or debugging is off; the message now lists per-endpoint reasons plus whether the port is listening, the `/json/version` status and the `DevToolsActivePort` contents |
 | Attach fails with `Timeout ... exceeded` plus "port is listening but the WebSocket handshake never completed" | **Chrome is waiting for you to approve**: switch to Chrome and click Allow in the "Allow remote debugging?" dialog, then call `browser_attach` again. If you cannot find the dialog, check other/minimized Chrome windows; raise `PW_CDP_TIMEOUT` if you need longer |
+| Attach fails with `Timeout ... exceeded` plus "the WebSocket handshake completed, but initialization never finished" | **Not a consent problem**: a tab's renderer is not responding (attaching waits for every existing tab to finish initializing). The message lists the current tabs — close the stuck one (Chrome usually shows "Page unresponsive") and retry; lower `PW_CDP_TIMEOUT` to fail fast |
+| A `browser_tabs` row shows `(not responding)` as its title | That tab's renderer is stuck (infinite loop, Chrome's "Page unresponsive", a paused debugger). Its title and page operations are unavailable, so don't drive it; close it in the browser to recover. A plain `(untitled)` just means the page has no title |
+| `browser_tabs` / `browser_status` hang forever | 0.4.0 and earlier wedged the whole call on a non-responding tab's title. From 0.4.1 every round-trip is budgeted (`PW_RTT_TIMEOUT`, default 1500ms), so the worst case is a `(not responding)` marker |
 | Every `browser_attach` pops the consent dialog again | Something disconnected in between (`browser_close`, plugin reload, DSH restart). A repeated `browser_attach` on the same endpoint now reuses the connection; to get rid of the dialog entirely use the port form with a dedicated `--user-data-dir` (see Option C) |
 | In attach mode `browser_open` overwrote the page I was reading | Expected — it navigates the currently tracked tab; call `browser_tabs` first, or pin a tab with `PW_CDP_PAGE` |
 | `net::ERR_CONNECTION_CLOSED` | Network issue or anti-bot on the target site; try another site / retry later |

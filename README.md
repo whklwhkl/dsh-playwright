@@ -125,10 +125,11 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 - `browser_status` **不会**主动建立连接（一条新连接 = 一次授权弹窗，只读查询不值得让用户点框）；未挂载时它会告诉你去调 `browser_attach`；
 - 同一端点上重复 `browser_attach` 会**复用现有连接**（只按 `page` 子串重选标签页），不会断开重连、不会又弹一个授权框；
 - `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
+- 取标题这类"顺手带的信息"都有**往返预算**：某个标签的渲染进程卡死（死循环、Chrome 的「页面无响应」、DevTools 里断点暂停）时，它会被标成 `(无响应)`，整次调用仍在约 `PW_RTT_TIMEOUT` 毫秒内返回，而不是挂住整轮对话；
 - `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
 - `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭）；
 - `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
-- 挂载失败时会打印诊断：端口是否在监听、`/json/version` 的 HTTP 状态、`DevToolsActivePort` 内容；若是"端口在监听但握手没完成"，会明确提示你去 Chrome 点「允许远程调试」；
+- 挂载失败时会打印诊断：端口是否在监听、`/json/version` 的 HTTP 状态、`DevToolsActivePort` 内容；并且区分「WS 握手就没完成」（= 在等你点「允许远程调试」）与「握手完成了但初始化没结束」（= 某个标签的渲染进程不响应，报错里会列出各标签帮你定位）；
 - 连接预算由 `PW_CDP_TIMEOUT` 控制（默认 90 秒，留够看到弹窗并点一下的时间）；端口无人监听时仍然毫秒级快速失败，不会白等；
 - 该模式下 `PW_HEADLESS`、`PW_CHROMIUM_PATH` 无效（浏览器是你自己起的）。
 
@@ -145,6 +146,7 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 | `PW_CDP_ENDPOINT` | 未设置 | 设置后进入挂载模式：`chrome` / `msedge` 等 channel 名、`http://127.0.0.1:9222`、`ws://…`，逗号分隔可做回退，`auto` = 先 chrome 再 9222 |
 | `PW_CDP_PAGE` | 未设置 | 挂载时按 URL 或标题**子串**挑选要接手的标签页 |
 | `PW_CDP_TIMEOUT` | `90000` | 挂载连接预算毫秒。它同时是"等你在授权框上点允许"的窗口；端口无人监听时仍毫秒级快速失败 |
+| `PW_RTT_TIMEOUT` | `1500` | 单次页面往返（取标题、置前）的预算毫秒。渲染进程卡死时靠它快速失败并标记 `(无响应)`，而不是把整次调用挂死 |
 
 ## 内置 skill：playwright-browser-tips
 
@@ -173,6 +175,9 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 | `connect ECONNREFUSED 127.0.0.1:9222` | 目标浏览器没起来或端口不对：确认它带 `--remote-debugging-port=9222` 启动，且 `curl http://127.0.0.1:9222/json/version` 有返回 |
 | `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出失败原因 + 端口是否在监听 + `/json/version` 状态 + `DevToolsActivePort` 内容，不用手工摸排 |
 | 挂载报 `Timeout ... exceeded`，同时提示"端口在监听但 WS 握手一直没完成" | **Chrome 在等你点授权框**：切到 Chrome 窗口点「允许远程调试」的「允许」，再调一次 `browser_attach`。框没看到就翻一下其他窗口/最小化的 Chrome；点得慢就把 `PW_CDP_TIMEOUT` 调大 |
+| 挂载报 `Timeout ... exceeded`，提示是"WS 握手已经完成，但初始化一直没结束" | **不是授权框问题**：浏览器里有标签的渲染进程不响应（挂载要等所有已存在的标签页初始化完）。报错里会列出当前标签，关掉那个卡住的（Chrome 里常显示"页面无响应"）再重试；想快速失败可调小 `PW_CDP_TIMEOUT` |
+| `browser_tabs` 某一行的标题是 `(无响应)` | 那个标签的渲染进程卡死了（死循环、Chrome 的"页面无响应"、DevTools 里断点暂停）。它的标题和页面操作都取不到，别再驱动它；在浏览器里关掉它即可恢复。若整行是 `(无标题)` 则只是页面本身没有标题 |
+| `browser_tabs` / `browser_status` 卡住不返回 | 0.4.0 及更早版本会把整次调用挂在无响应标签的标题上。0.4.1 起有往返预算（`PW_RTT_TIMEOUT`，默认 1500ms），最坏也只是标成 `(无响应)` |
 | 每调一次 `browser_attach` 都弹一次授权框 | 说明中间断开过（`browser_close`、插件重载、DSH 重启）。同一端点上重复 `browser_attach` 现在会复用连接；想彻底摆脱弹框就改用专属 `--user-data-dir` 的端口方式（见方式 C） |
 | 挂载模式下 `browser_open` 覆盖了我正在看的页面 | 正常现象——它导航的是"当前跟踪的标签页"；先 `browser_tabs` 切到目标页，或用 `PW_CDP_PAGE` 固定 |
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |

@@ -11,6 +11,9 @@ shots/
 # misc
 .DS_Store
 
+# local scratch / repro scripts
+.tmp/
+
 # pnpm local store and lockfile (library package, lockfile not tracked)
 .pnpm-store/
 pnpm-lock.yaml
