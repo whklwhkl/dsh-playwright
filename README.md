@@ -187,6 +187,7 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 | `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出失败原因 + 端口是否在监听 + `/json/version` 状态 + `DevToolsActivePort` 内容，不用手工摸排 |
 | 挂载报 `Timeout ... exceeded`，同时提示"端口在监听但 WS 握手一直没完成" | **Chrome 在等你点授权框**：切到 Chrome 窗口点「允许远程调试」的「允许」，再调一次 `browser_attach`。框没看到就翻一下其他窗口/最小化的 Chrome；点得慢就把 `PW_CDP_TIMEOUT` 调大 |
 | 挂载报 `Timeout ... exceeded`，提示是"WS 握手已经完成，但初始化一直没结束" | **不是授权框问题**：浏览器里有标签的渲染进程不响应（挂载要等所有已存在的标签页初始化完）。报错里会列出当前标签，关掉那个卡住的（Chrome 里常显示"页面无响应"）再重试；想快速失败可调小 `PW_CDP_TIMEOUT` |
+| 同上，而且你刚经历过**电脑意外关机 / Chrome 异常退出后重开** | 同一条原因：Chrome 恢复会话时留下的那些挂起标签一直没真正加载，也算"没初始化完"（实测踩过）。把那些标签关掉（或先 `browser_attach({endpoint:"launch"})` 用自建实例绕开），或者干脆清掉 `PW_CDP_ENDPOINT` 不挂载 |
 | `browser_tabs` 某一行的标题是 `(无响应)` | 那个标签的渲染进程卡死了（死循环、Chrome 的"页面无响应"、DevTools 里断点暂停）。它的标题和页面操作都取不到，别再驱动它；在浏览器里关掉它即可恢复。若整行是 `(无标题)` 则只是页面本身没有标题 |
 | `browser_tabs` / `browser_status` 卡住不返回 | 0.4.0 及更早版本会把整次调用挂在无响应标签的标题上。0.4.1 起有往返预算（`PW_RTT_TIMEOUT`，默认 1500ms），最坏也只是标成 `(无响应)` |
 | 每调一次 `browser_attach` 都弹一次授权框 | 说明中间断开过（`browser_close`、插件重载、DSH 重启）。同一端点上重复 `browser_attach` 现在会复用连接；想彻底摆脱弹框就改用专属 `--user-data-dir` 的端口方式（见方式 C） |
