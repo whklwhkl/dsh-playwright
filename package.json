@@ -1,6 +1,6 @@
 {
   "name": "playwright-browser",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Playwright browser automation tools for DSH: open pages, click, type, fill, extract, screenshot.",
   "type": "module",
   "main": "lib/index.js",
@@ -17,8 +17,17 @@
   "dependencies": {
     "playwright-core": "^1.62.1"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "dsh": "^0.2.0-rc.2"
   },
   "keywords": [
     "deepseek-harness",

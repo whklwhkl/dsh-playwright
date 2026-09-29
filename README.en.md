@@ -5,12 +5,19 @@
 
 Browser automation plugin for DSH (DeepSeek Harness): gives agents a set of `browser_*` model tools that drive a real Chromium via Playwright — open pages, click, fill forms, extract the DOM, take screenshots.
 
-> Compatibility: tested against [dsh 0.1.2-alpha.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.5).
+> Compatibility: tested against [dsh 0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) — tool registration and real browser driving, the bundled skill, and bundle composition were all exercised on that version.
+>
+> Since dsh 0.2.0-rc.2 there is a **plugin compatibility gate**: dsh reads a plugin's `peerDependencies` and **denies** any row whose `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` semver range does not satisfy the running runtime (the plugin manager reports `incompatible-version`); the row only loads after `dsh plugin allow-version <package>@<version> --dsh-version <version> --accept-risk`. This plugin therefore declares `@deepseek-ai/dsh: ^0.2.0-rc.2` (the whole 0.2.x line) and mirrors it in `engines.dsh`. When you move to dsh 0.3 or later, update this plugin too, or the gate will hold it back.
+>
+> That peer is marked `optional`: dsh writes `autoInstallPeers: false` into every profile, and the runtime dsh is supplied by the installation rather than installed into the profile — optional only avoids pnpm's "unmet peer" warning. The gate reads `peerDependencies` itself and ignores `peerDependenciesMeta`.
 
 - Requires `playwright-core` directly inside the host process — no external bridge service or ports of its own
 - The browser launches lazily on first use and is closed automatically when the plugin is unloaded
 - Optionally **attaches to an already-open browser** (CDP attach): take over the Chrome/Edge you are using, logins, cookies, extensions and open tabs included (see below)
 - Only dependency: `playwright-core`
+- **Cancel means cancel**: `exec.signal` is forwarded — `goto`/`click`/`fill`/`type`/`press`/`innerText`/`screenshot` hand the signal to Playwright (the in-flight operation is really aborted), and the calls Playwright cannot cancel (`connectOverCDP`, `launch`, `evaluate`, `waitForTimeout`, …) still settle immediately, so an interrupted turn never hangs on the browser
+- **A failure is a failure**: a failing op throws, so dsh renders the canonical failed result (`isError`, text `Error: …`) instead of a "successful" call whose text happens to start with an error prefix — retry/self-correction policies and the session log can see it
+- **Screenshots are visible**: `browser_screenshot` hands the PNG to the profile's attachment service and returns an image block beside the path, so a model that accepts image input sees the page directly (otherwise dsh substitutes placeholder text and the path still works with `read_image`)
 
 Language: tool descriptions, parameter docs and result text are bilingual. Set `PW_LANG=en` for English; the default is `zh`. See [中文版 README](./README.md).
 
@@ -30,7 +37,7 @@ Language: tool descriptions, parameter docs and result text are bilingual. Set `
 | `browser_extract` | Extract text from the page or an element |
 | `browser_html` | Extract HTML from the page or an element |
 | `browser_eval` | Run a JS expression in the page context (DOM diagnostics etc.) |
-| `browser_screenshot` | Save a screenshot as PNG; returns the absolute path |
+| `browser_screenshot` | Save a screenshot as PNG and return the absolute path; a model that accepts image input also sees the image |
 | `browser_close` | Close the browser and free resources (attach mode: disconnect only) |
 
 ## Installing into a DSH profile
@@ -49,6 +56,10 @@ For local development, point at your checkout with a `link:` prefix to install a
 ```bash
 dsh plugin --profile web add link:/path/to/dsh-playwright
 ```
+
+> A `link:` install is a symlink, so **the plugin's own dependencies are not installed into the profile**: run `pnpm install` in this checkout once (it installs `playwright-core`), or dsh will fail to load the plugin with `Cannot find package 'playwright-core'` and the `browser_*` tools simply disappear. The `pnpm-workspace.yaml` in this repo (`autoInstallPeers: false`) exists for the same reason — it is exactly what dsh writes into every profile, and it stops pnpm from following `peerDependencies` into pulling the whole `@deepseek-ai/dsh` runtime tree into this checkout.
+>
+> If the tools worked and then vanished after a plugin reinstall, restart dsh: a host plugin that failed to load is not retried automatically.
 
 **Restart DSH:** bundles are read at startup. After the restart, the `browser_*` tools are available to every session under this profile.
 
@@ -184,7 +195,9 @@ The skill needs a profile with the skill registry — every `dsh-base`-backed pr
 | `net::ERR_CONNECTION_CLOSED` | Network issue or anti-bot on the target site; try another site / retry later |
 | CAPTCHA popup (e.g. Baidu slider), input box invisible under headless | Anti-automation, not a plugin problem; Bing worked end to end in testing — prefer Bing, or set `PW_HEADLESS=false` for headed mode |
 | Element "not visible" | Page changed or selector outdated; use `browser_eval` to inspect the DOM and pick a new selector |
-| The current model can't view screenshots | `browser_screenshot` only saves a file; a vision-capable model is needed to "see" the image |
+| The screenshot returns only a path, no image | Three causes: no attachment service is mounted (every `dsh-base`-backed profile mounts one), the image exceeds the deployment's limits, or the current model does not accept image input. The latter two are harmless — the path is still returned and `read_image` can view it |
+| After `browser_open` fails with `net::ERR_*`, every later page load fails with `... is interrupted by another navigation to chrome-error://...` | Pre-0.5.0 behaviour: a failed navigation leaves a pending error-page navigation in that tab and blocks every later navigation in it (a reload cannot recover). From 0.5.0 `browser_open` detects these failures and swaps the page out (launched mode closes and recreates it; attach mode opens a new tab and **does not close yours**) |
+| Failed results changed from `错误：…` to `Error: …` | From 0.5.0 errors are thrown to dsh, which renders the canonical failed result (`isError`); the prefix is dsh's, hence English. Test `isError`, not the text |
 
 ## Local development / quick self-test
 

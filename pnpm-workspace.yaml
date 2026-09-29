@@ -1,0 +1,12 @@
+# pnpm settings for this checkout.
+#
+# `autoInstallPeers: false` mirrors what dsh writes into every profile
+# (PROFILE_PNPM_WORKSPACE in @deepseek-ai/dsh-app-boot). The harness is supplied
+# by the dsh installation, not by this package, so the declared
+# `peerDependencies: { "@deepseek-ai/dsh": ... }` — the field dsh's plugin
+# compatibility gate reads — must NOT drag a second copy of the whole runtime
+# into this package's node_modules.
+packages:
+  - .
+
+autoInstallPeers: false

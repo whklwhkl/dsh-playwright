@@ -5,12 +5,19 @@
 
 DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `browser_*` 模型工具，用 Playwright 驱动 Chromium 真实操作网页——打开页面、点击、填表、抓取 DOM、截图。
 
-> 兼容性：对 [dsh 0.1.2-alpha.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-alpha.5) 实测通过。
+> 兼容性：对 [dsh 0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) 实测通过——`browser_*` 工具注册与实际驱动、内置 skill、bundle 装配都在该版本上跑过。
+>
+> 从 dsh 0.2.0-rc.2 起多了一道**插件兼容闸门**：dsh 会读插件的 `peerDependencies`，凡是声明了 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 且 semver 不满足当前运行时的插件行，会被**直接拒绝加载**（插件管理里报 `incompatible-version`），需要 `dsh plugin allow-version <包>@<版本> --dsh-version <版本> --accept-risk` 才放行。本插件据此声明了 `@deepseek-ai/dsh: ^0.2.0-rc.2`（覆盖整个 0.2.x 线），并同步写了 `engines.dsh`。升级 dsh 到 0.3 及以上时请同步更新本插件，否则会被闸门拦下。
+>
+> 该 peer 标记为 `optional`：dsh 给每个 profile 写了 `autoInstallPeers: false`，运行时的 dsh 由安装目录提供、不由 profile 安装，标成 optional 只是避免 pnpm 报"未满足的 peer"——闸门读的是 `peerDependencies` 本身，不受 `peerDependenciesMeta` 影响。
 
 - 宿主进程内直接 `require('playwright-core')`，自建模式下无需外部桥服务或端口
 - 浏览器按需懒启动，插件卸载时自动关闭
 - 可选**挂载已经打开的浏览器**（CDP attach）：直接接管你正在用的 Chrome/Edge，登录态、Cookie、扩展、已开标签页全都在（见下文）
 - 只依赖 `playwright-core`，无其他运行时依赖
+- **中断即取消**：转发 `exec.signal`——`goto`/`click`/`fill`/`type`/`press`/`innerText`/`screenshot` 把取消信号直接交给 Playwright（在途操作真的被中止），Playwright 无法取消的调用（`connectOverCDP`、`launch`、`evaluate`、`waitForTimeout` …）也保证立刻结算，不会把整轮对话吊在那里
+- **失败就是失败**：出错时直接抛，由 dsh 渲染成带 `isError` 的规范失败结果（正文是 `Error: …`），不再拼成"看起来成功"的字符串——重试/纠错类策略和会话日志都能看见
+- **截图能"看"**：`browser_screenshot` 把 PNG 交给 profile 的 attachment 服务，以图片块与路径一起内联；支持图片输入的模型直接看到画面（不支持时 dsh 自动换成占位文本，仍可用返回的路径调 `read_image`）
 - 工具描述/参数文档/输出文案支持中英双语（`PW_LANG=en` 切换，默认中文）— [English README](./README.en.md)
 
 ## 功能一览
@@ -29,7 +36,7 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | `browser_extract` | 抓取页面或指定元素的文本 |
 | `browser_html` | 抓取页面或指定元素的 HTML |
 | `browser_eval` | 在页面上下文执行 JS 表达式（诊断 DOM 等） |
-| `browser_screenshot` | 截图保存为 PNG，返回绝对路径 |
+| `browser_screenshot` | 截图保存为 PNG 并返回绝对路径；支持图片输入的模型同时看到画面本身 |
 | `browser_close` | 关闭浏览器释放资源（挂载模式下只断开连接） |
 
 ## 安装到 DSH profile
@@ -48,6 +55,10 @@ dsh plugin --profile web add git+https://github.com/whklwhkl/dsh-playwright.git
 ```bash
 dsh plugin --profile web add link:/path/to/dsh-playwright
 ```
+
+> `link:` 装的是符号链接，**插件自己的依赖不会跟着进 profile**：先在这个 checkout 里跑一次 `pnpm install`（装 `playwright-core`），否则 dsh 加载插件时会报 `Cannot find package 'playwright-core'`，`browser_*` 工具直接消失。仓库里那份 `pnpm-workspace.yaml`（`autoInstallPeers: false`）也是为此——dsh 给每个 profile 写的就是同一份设置，它阻止 pnpm 顺着 `peerDependencies` 把整个 `@deepseek-ai/dsh` 运行时树拉进这个仓库。
+>
+> 如果工具是"先能用、重装插件后消失"，先重启 dsh：宿主插件加载失败不会被自动重试。
 
 **重启 DSH：** bundle 列表在启动时读取，重启后 `browser_*` 工具对 profile 下所有会话自动可用。
 
@@ -183,7 +194,9 @@ skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app �
 | `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
 | 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |
 | 元素"not visible" | 页面改版或选择器过时，用 `browser_eval` 检查 DOM 再选选择器 |
-| 当前模型看不了截图 | `browser_screenshot` 只保存文件；需要支持图片输入的视觉模型才能"看"图 |
+| 截图只返回路径、没有画面 | 三种原因：profile 没挂 attachment 服务（`dsh-base` 系 profile 都挂了）、图片超出部署上限、或当前模型不接受图片输入。后两种不影响使用——路径照常返回，可用 `read_image` 查看 |
+| `browser_open` 报 `net::ERR_*` 后，再开任何页面都报 `... is interrupted by another navigation to chrome-error://...` | 0.5.0 之前的老问题：失败的导航会在那个标签里挂起一条错误页导航，把该标签的后续导航全部堵死（reload 也救不回来）。0.5.0 起 `browser_open` 检测到这类失败会自动换掉那个 page（自建实例关掉重开；挂载模式改为新开一个标签，**不关你的标签**） |
+| 失败结果的正文从 `错误：…` 变成了 `Error: …` | 0.5.0 起错误直接抛给 dsh，由它渲染成规范失败结果（`isError`）：前缀由 dsh 决定，因此是英文。工具是否失败看 `isError`，不要匹配文案 |
 
 ## 本地开发 / 快速自测
 
