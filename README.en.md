@@ -12,8 +12,8 @@ Browser automation plugin for DSH (DeepSeek Harness): gives agents a set of `bro
 > That peer is marked `optional`: dsh writes `autoInstallPeers: false` into every profile, and the runtime dsh is supplied by the installation rather than installed into the profile — optional only avoids pnpm's "unmet peer" warning. The gate reads `peerDependencies` itself and ignores `peerDependenciesMeta`.
 
 - Requires `playwright-core` directly inside the host process — no external bridge service or ports of its own
-- The browser launches lazily on first use and is closed automatically when the plugin is unloaded
-- Optionally **attaches to an already-open browser** (CDP attach): take over the Chrome/Edge you are using, logins, cookies, extensions and open tabs included (see below)
+- **One browser per session**: browser state is keyed by the calling session (`exec.agent`) and launches lazily, fork-like — concurrent sessions never fight over one window; each session's browser is closed/disconnected when that session ends (see "Multiple sessions" below)
+- Optionally **attaches to an already-open browser** (CDP attach): take over the Chrome/Edge you are using, logins, cookies, extensions and open tabs included; when several sessions attach to the same browser, each drives its own tab (see below)
 - Only dependency: `playwright-core`
 - **Cancel means cancel**: `exec.signal` is forwarded — `goto`/`click`/`fill`/`type`/`press`/`innerText`/`screenshot` hand the signal to Playwright (the in-flight operation is really aborted), and the calls Playwright cannot cancel (`connectOverCDP`, `launch`, `evaluate`, `waitForTimeout`, …) still settle immediately, so an interrupted turn never hangs on the browser
 - **A failure is a failure**: a failing op throws, so dsh renders the canonical failed result (`isError`, text `Error: …`) instead of a "successful" call whose text happens to start with an error prefix — retry/self-correction policies and the session log can see it
@@ -26,7 +26,7 @@ Language: tool descriptions, parameter docs and result text are bilingual. Set `
 | Tool | What it does |
 |---|---|
 | `browser_open` | Open a URL; returns the final address and page title |
-| `browser_status` | Query browser / current page state (attach mode, endpoint, URL, title, tab count) |
+| `browser_status` | Query this session's browser / page state (attach mode, endpoint, URL, title, tab count, owning session) |
 | `browser_attach` | Attach to / switch to an already-running browser at runtime (no DSH restart) |
 | `browser_tabs` | List / switch / close open tabs (how the agent takes over your page in attach mode) |
 | `browser_click` | Click an element (CSS or `text=` selector) |
@@ -38,7 +38,7 @@ Language: tool descriptions, parameter docs and result text are bilingual. Set `
 | `browser_html` | Extract HTML from the page or an element |
 | `browser_eval` | Run a JS expression in the page context (DOM diagnostics etc.) |
 | `browser_screenshot` | Save a screenshot as PNG and return the absolute path; a model that accepts image input also sees the image |
-| `browser_close` | Close the browser and free resources (attach mode: disconnect only) |
+| `browser_close` | Close this session's browser and free resources (attach mode: disconnect only; other sessions unaffected) |
 
 ## Installing into a DSH profile
 
@@ -127,7 +127,8 @@ Attach-mode contract:
 - `browser_tabs` lists every tab (`*` = current one); pass `index` or a `url` substring to switch to it (and bring it to front), add `close:true` to close it;
 - incidental round-trips such as reading a title are **budgeted**: when a tab's renderer is stuck (infinite loop, Chrome's "Page unresponsive", a paused debugger) it is marked `(not responding)` and the call still returns within about `PW_RTT_TIMEOUT` ms instead of wedging the whole turn;
 - `browser_open` navigates **the currently tracked tab** — don't point it at a page you want to keep; call `browser_tabs` first;
-- `browser_close` **only disconnects and never closes your browser** (only a plugin-launched instance is really closed);
+- `browser_close` **only disconnects and never closes your browser** (only a plugin-launched instance is really closed), and only affects the current session;
+- **one tab per session**: when two sessions attach to the same browser, the later one skips tabs already driven by another live session and picks a free one (or opens a fresh tab when all are taken — same context, so logins are inherited). An explicit `browser_attach({page:…})` / `browser_tabs` takeover overrides the claim; the displaced session re-picks on its next call instead of grabbing it back;
 - `PW_CDP_PAGE` pins the tab to take over, by URL/title substring;
 - a failed attach reports diagnostics — whether the port is listening, the `/json/version` HTTP status, the `DevToolsActivePort` contents — and distinguishes "the WebSocket handshake never completed" (= waiting for you to click Allow) from "the handshake completed but initialization never finished" (= a tab's renderer is not responding; the message lists the tabs to help you spot it);
 - the connect budget is `PW_CDP_TIMEOUT` (default 90s, enough to notice the dialog and click it); a port with nobody listening still fails in milliseconds;
@@ -147,11 +148,29 @@ Attach-mode contract:
 
 > Difference from [webclaw3](https://github.com/fatmind/webclaw3): webclaw3 bridges through a Chrome extension plus a local service; this plugin attaches natively over CDP, so no extension is needed. The trade-off is that CDP cannot see privileged pages such as `chrome://…` (the extension bridge can).
 
+## Multiple sessions: each session owns its browser
+
+Before 0.6 the whole profile shared a single browser state, so concurrent sessions fought over one window and one "current tab". Browser state is now **isolated per session**, fork-like:
+
+- **Launch mode**: each session lazily spawns its **own** Chromium on its first `browser_*` call — separate window, cookies and tabs. One session calling `browser_close` or ending never touches the others.
+- **Attach mode**: sessions share your browser (that is the point of attaching) but each drives **its own tab**: tab selection skips tabs claimed by other live sessions and opens a fresh one when all are taken (same context, logins inherited). Explicit `page=` / `browser_tabs` takeovers win; the displaced session re-picks on its next call, so nobody grabs back.
+- **Lifecycle follows the session**: the browser hangs off the session's own cordis scope (`exec.agent.ctx.effect` — the same path `dsh-tool-bash-persistent` uses for per-session shells). When a session/subagent ends, its launched instance is closed and its attach connection disconnected; plugin teardown cleans up everything. Subagents are agents too: each forks its own browser and releases it when done.
+- **Serialized within a session**: parallel `browser_*` calls queue inside the session so they never race on tab selection; `browser_status` is a read-only query and does not queue.
+- `browser_status` names the owning session; auto screenshot filenames carry a session marker (`shot-<timestamp>-<session>.png`) so concurrent shots never overwrite each other.
+- To restore the legacy behavior (one browser for the whole profile): set `PW_BROWSER_SCOPE=shared`.
+
+Self-test (no DSH needed; launches real Chromium to verify two-session isolation, attach-mode tab splitting and disposal cleanup):
+
+```bash
+node scripts/test-session-isolation.mjs
+```
+
 ## Configuration (environment variables)
 
 | Variable | Default | Description |
 |---|---|---|
 | `PW_LANG` | `zh` | `en` for English tool descriptions and output |
+| `PW_BROWSER_SCOPE` | `session` | Each session owns its browser/tab; set to `shared` for the pre-0.6 "one browser for the whole profile" behavior |
 | `PW_CHROMIUM_PATH` | auto-discovery | Reuse a specific browser executable |
 | `PW_HEADLESS` | `true` | Set to `false` to show a visible window (no effect in attach mode) |
 | `PW_SHOT_DIR` | `shots/` under the plugin dir | Directory for screenshots |

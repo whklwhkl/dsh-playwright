@@ -12,8 +12,8 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 > 该 peer 标记为 `optional`：dsh 给每个 profile 写了 `autoInstallPeers: false`，运行时的 dsh 由安装目录提供、不由 profile 安装，标成 optional 只是避免 pnpm 报"未满足的 peer"——闸门读的是 `peerDependencies` 本身，不受 `peerDependenciesMeta` 影响。
 
 - 宿主进程内直接 `require('playwright-core')`，自建模式下无需外部桥服务或端口
-- 浏览器按需懒启动，插件卸载时自动关闭
-- 可选**挂载已经打开的浏览器**（CDP attach）：直接接管你正在用的 Chrome/Edge，登录态、Cookie、扩展、已开标签页全都在（见下文）
+- **每个会话自己的浏览器**：浏览器按会话（`exec.agent`）懒启动，像进程 fork 一样各用各的窗口，互不抢页；会话结束时自动关闭/断开（见下文「多会话」）
+- 可选**挂载已经打开的浏览器**（CDP attach）：直接接管你正在用的 Chrome/Edge，登录态、Cookie、扩展、已开标签页全都在；多会话挂载同一浏览器时各自驱动自己的标签页（见下文）
 - 只依赖 `playwright-core`，无其他运行时依赖
 - **中断即取消**：转发 `exec.signal`——`goto`/`click`/`fill`/`type`/`press`/`innerText`/`screenshot` 把取消信号直接交给 Playwright（在途操作真的被中止），Playwright 无法取消的调用（`connectOverCDP`、`launch`、`evaluate`、`waitForTimeout` …）也保证立刻结算，不会把整轮对话吊在那里
 - **失败就是失败**：出错时直接抛，由 dsh 渲染成带 `isError` 的规范失败结果（正文是 `Error: …`），不再拼成"看起来成功"的字符串——重试/纠错类策略和会话日志都能看见
@@ -25,7 +25,7 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | 工具 | 作用 |
 |---|---|
 | `browser_open` | 打开 URL，返回最终地址与页面标题 |
-| `browser_status` | 查询浏览器/当前页面状态（是否挂载、端点、URL、标题、标签页数） |
+| `browser_status` | 查询当前会话的浏览器/页面状态（是否挂载、端点、URL、标题、标签页数、所属会话） |
 | `browser_attach` | 运行时挂载/切换到一个已在运行的浏览器（无需重启 DSH） |
 | `browser_tabs` | 列出/切换/关闭已打开的标签页（挂载模式下的"接手"入口） |
 | `browser_click` | 点击元素（CSS 或 `text=` 选择器） |
@@ -37,7 +37,7 @@ DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `brow
 | `browser_html` | 抓取页面或指定元素的 HTML |
 | `browser_eval` | 在页面上下文执行 JS 表达式（诊断 DOM 等） |
 | `browser_screenshot` | 截图保存为 PNG 并返回绝对路径；支持图片输入的模型同时看到画面本身 |
-| `browser_close` | 关闭浏览器释放资源（挂载模式下只断开连接） |
+| `browser_close` | 关闭当前会话的浏览器释放资源（挂载模式下只断开连接，不影响其他会话） |
 
 ## 安装到 DSH profile
 
@@ -138,7 +138,8 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 - `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
 - 取标题这类"顺手带的信息"都有**往返预算**：某个标签的渲染进程卡死（死循环、Chrome 的「页面无响应」、DevTools 里断点暂停）时，它会被标成 `(无响应)`，整次调用仍在约 `PW_RTT_TIMEOUT` 毫秒内返回，而不是挂住整轮对话；
 - `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
-- `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭）；
+- `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭），且只影响当前会话；
+- **多会话各自一个标签页**：两个会话挂载同一个浏览器时，先到的会话挑中标签页后，后到的会话会跳过它、挑另一个空闲标签（全被占用就新开一个，登录态照样继承）；用 `browser_attach({page:…})` / `browser_tabs` 显式接手可以无视占用，被挤掉的会话下次调用会自动改挑别的标签，不会反过来抢回去；
 - `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
 - 挂载失败时会打印诊断：端口是否在监听、`/json/version` 的 HTTP 状态、`DevToolsActivePort` 内容；并且区分「WS 握手就没完成」（= 在等你点「允许远程调试」）与「握手完成了但初始化没结束」（= 某个标签的渲染进程不响应，报错里会列出各标签帮你定位）；
 - 连接预算由 `PW_CDP_TIMEOUT` 控制（默认 90 秒，留够看到弹窗并点一下的时间）；端口无人监听时仍然毫秒级快速失败，不会白等；
@@ -146,11 +147,29 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 
 > 与 [webclaw3](https://github.com/fatmind/webclaw3) 的区别：webclaw3 走 Chrome 扩展桥接 + 本地服务，本插件走 Playwright 原生 CDP 挂载，不需要装扩展；代价是 CDP 看不到 `chrome://` 等特权页面（扩展桥接可以）。
 
+## 多会话：每个会话自己的浏览器
+
+0.6 之前整个 profile 只有一份浏览器状态，所有会话共用——并行开会话时大家抢同一个窗口、同一个"当前标签页"。现在浏览器状态**按会话隔离**，像进程 fork 一样：
+
+- **自建模式**：每个会话第一次调 `browser_*` 时懒启动**自己的** Chromium 实例，窗口、Cookie、标签页完全独立；一个会话 `browser_close` 或结束，不影响别的会话。
+- **挂载模式**：大家共享你那个浏览器（这正是挂载的意义），但每个会话驱动**自己的标签页**：选页时跳过其他存活会话正在用的标签，全被占用就新开一个（同一 context，登录态继承）。显式 `page=`/`browser_tabs` 接手优先，被挤掉的会话下次调用自动改挑，不会互相抢。
+- **生命周期跟着会话走**：浏览器挂在会话自己的 cordis scope 上（`exec.agent.ctx.effect`，与 `dsh-tool-bash-persistent` 持有每会话 shell 同一条路）。会话/子代理结束时自建实例被关闭、挂载连接被断开；插件卸载时兜底清理全部。子代理也是独立 agent，同样各 fork 各的，用完即收。
+- **同一会话内串行**：并行的 `browser_*` 调用在会话内排队执行，不会在选页/换页上打架；`browser_status` 是只读查询，不排队。
+- `browser_status` 会标明所属会话；自动截图文件名带会话标记（`shot-<时间戳>-<会话>.png`），并发截图不互相覆盖。
+- 想回到老行为（全 profile 共用一个浏览器）：设 `PW_BROWSER_SCOPE=shared`。
+
+自测（不启动 DSH，真实起 Chromium 验证双会话隔离/挂载分页/销毁清理）：
+
+```bash
+node scripts/test-session-isolation.mjs
+```
+
 ## 配置（环境变量）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PW_LANG` | `zh` | 设为 `en` 切换工具描述与输出为英文 |
+| `PW_BROWSER_SCOPE` | `session` | 每个会话独占自己的浏览器/标签页；设为 `shared` 回到 0.6 之前"全 profile 共用一个浏览器"的老行为 |
 | `PW_CHROMIUM_PATH` | 自动发现 | 复用指定浏览器可执行文件 |
 | `PW_HEADLESS` | `true` | 设为 `false` 弹出可见窗口（挂载模式下无效） |
 | `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
