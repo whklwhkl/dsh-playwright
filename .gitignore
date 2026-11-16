@@ -11,6 +11,9 @@ shots/
 # misc
 .DS_Store
 
+# local investigation notes (keep them out of the repo)
+*问题记录*.md
+
 # local scratch / repro scripts
 .tmp/
 
