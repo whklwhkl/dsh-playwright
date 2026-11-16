@@ -181,7 +181,7 @@ node scripts/test-session-isolation.mjs
 
 ## Bundled skill: playwright-browser-tips
 
-The bundle also carries a `playwright-browser-tips` skill whose body is a **site map**: per-site observed behavior and tactics under automation (search defaults to Bing), plus general recovery patterns. Bilingual following `PW_LANG`; the model loads it on demand when browser_* tools fail or when automating search/login flows, and users can invoke it directly with `/playwright-browser-tips`.
+The bundle also carries a `playwright-browser-tips` skill whose body is a **site map**: per-site observed behavior and tactics under automation (search defaults to Bing), plus general recovery patterns and login-state reuse rules. Bilingual following `PW_LANG`; the model loads it on demand when browser_* tools fail or when automating search/login flows, and users can invoke it directly with `/playwright-browser-tips`.
 
 The map welcomes contributions — humans and agents alike can submit entries per [SITE-MAP-SPEC.md](./SITE-MAP-SPEC.md) (touch only `assets/site-map.json`), running `node scripts/validate-site-map.js` first and attaching its output to the PR. The framework text — including the anti-automation boundary (CAPTCHAs are always completed manually by the user) — is code-owned and does not change with map data.
 

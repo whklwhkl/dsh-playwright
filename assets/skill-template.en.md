@@ -12,9 +12,20 @@ Consult this map before automating a web task: site facts and tactics are mainta
 - Empty extract: wait about 1 second or scroll the page, then extract once more.
 - After each navigation, confirm the current URL and title with `browser_status` before acting.
 - If `browser_status` says it is attached to your running browser: `browser_open` navigates the **currently tracked tab**. Check `browser_tabs` first and switch to the page you want (or pin one with `PW_CDP_PAGE`) instead of overwriting a page the user is reading; and don't expect `browser_close` to close that browser — it only disconnects.
-- When the task needs existing logins but you are on a fresh plugin-launched browser: call `browser_attach` to attach to the browser the user is already using (the user must first tick "Allow remote debugging for this browser instance" at `chrome://inspect/#remote-debugging`); switch back afterwards with `browser_attach({endpoint:"launch"})`.
 - When an attach reports `Timeout`, first tell the two cases apart: "the WebSocket handshake never completed" means ask the user to click Allow in Chrome's "Allow remote debugging?" dialog (Chrome 136+ requires consent for **every new CDP connection** and parks the handshake silently — it is not a network problem); "the handshake completed, but initialization never finished" is NOT a consent problem — a tab's renderer is not responding, so ask the user to close that tab. Do not retry `browser_attach` in a loop; a second `browser_attach` on the same endpoint reuses the live connection. A read-only `browser_status` never connects on its own, so call `browser_attach` when it says you are not attached.
 - When `browser_tabs` / `browser_status` shows `(not responding)` as a title: that tab's renderer is stuck (infinite loop, "Page unresponsive", a paused debugger) and neither its title nor its page operations are available. Do **not** keep driving it — switch to another tab (`browser_tabs({index:...})`) and tell the user to close it. A plain `(untitled)` is harmless: it only means the page has no title.
+
+## Reusing an existing login
+
+The plugin's own browser is a clean environment: no cookies, no sessions, no extensions. When a task needs a login:
+
+- First check whether it really does: most pages are readable without one, so do not attach up front.
+- When needed, prefer `browser_attach` to the browser the user is already using (the user must have ticked "Allow remote debugging for this browser instance" at `chrome://inspect/#remote-debugging`). Logins, cookies, extensions and open tabs all carry over; sessions sharing one browser each drive their own tab, so the login state is inherited.
+- Landing on a login page / SSO / MFA means there is no session: do not loop on the form, and do not treat the login wall as something to circumvent. Passwords, SMS or email codes and QR confirmations are completed by the user — never type them, never ask for them.
+- Only log in inside a plugin-launched browser with the user's explicit consent for that run; otherwise ask the user to log in in their own browser first, then attach.
+- After attaching you act with the user's real identity: only do what the user asked, and confirm before anything with side effects (ordering, renewal, deletion, publishing, changing configuration).
+- Multiple sessions sharing one login: reads may run in parallel; writes with side effects must be serialized or coordinated so two agents never change the same resource at once.
+- Finish by switching back with `browser_attach({endpoint:"launch"})`; `browser_close` only disconnects and never closes the user's browser.
 
 ## Boundary
 

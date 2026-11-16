@@ -125,6 +125,16 @@
       "lastVerified": "2026-09-03",
       "verifiedBy": "playwright-browser 0.2.0 (system Chrome 152, headless)",
       "manualIntervention": true
+    },
+    {
+      "domain": "console.aliyun.com",
+      "site": "Alibaba Cloud console",
+      "task": "login",
+      "behavior": "Without a session the console redirects to account.aliyun.com/login with an oauth_callback back to the console; the login page offers QR (Alibaba Cloud app / Alipay / DingTalk), password, SMS, passkey and RAM login. First paint can be slow: the tab may briefly report as unresponsive before the title appears.",
+      "tactic": "Never type credentials, SMS codes or QR confirmations. Attach to the user's browser so the existing console session is reused; if the session has expired, ask the user to log in and say so instead of retrying the form.",
+      "lastVerified": "2026-11-17",
+      "verifiedBy": "playwright-browser 0.6.1 (system Chrome, headless, plugin-launched)",
+      "manualIntervention": true
     }
   ]
 }
