@@ -6,16 +6,18 @@
  * scoped ctx whose effect() unwinds on disposal). Verifies:
  *   1. launch mode: each session forks its OWN Chromium; markers set in one
  *      session's page are invisible to the other; disposing one session's
- *      agent closes only its browser;
- *   2. per-session serialization: parallel calls within one session settle
- *      in order (open then eval sees the opened page);
- *   3. attach mode: two sessions attaching to ONE debuggable Chrome drive
+ *      agent closes only its browser; parallel calls within one session are
+ *      serialized (open then eval sees the opened page);
+ *   2. attach mode: two sessions attaching to ONE debuggable Chrome drive
  *      different tabs; an explicit page= takeover transfers the tab and the
  *      displaced session re-picks a free/new tab on its next call;
- *   4. PW_BROWSER_SCOPE=shared restores the legacy one-browser-for-all.
+ *   3. PW_BROWSER_SCOPE=shared restores the legacy one-browser-for-all;
+ *   4. browser_status always names the calling session (short label from the
+ *      real `session-<uuid>` id shape) and explains what the next action does.
  *
  * Run: node scripts/test-session-isolation.mjs
- * Needs a playwright-core Chromium in the ms-playwright cache (see README).
+ * Reuses PW_CHROMIUM_PATH when set (system Chrome), otherwise needs a
+ * playwright-core Chromium in the ms-playwright cache (see README).
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -58,11 +60,15 @@ function mount() {
   }
 }
 
-// ── 1 + 2: launch mode, one browser per session ─────────────────────────────
+// ── 1: launch mode — one browser per session + in-session serialization ─────
 {
   const { call, teardown } = mount()
-  const A = fakeAgent('aaaa1111-session-a')
-  const B = fakeAgent('bbbb2222-session-b')
+  // 真实的 DSH 会话 id 长这样：session-<uuid>。标签不能截成所有人共用的 "session-"。
+  const A = fakeAgent('session-aaaa1111-53de-4c17-945f-bb7d7a457a29')
+  const B = fakeAgent('session-bbbb2222-53de-4c17-945f-bb7d7a457a29')
+
+  // status 在任何状态下（这里还没启动浏览器）都要标明调用方会话
+  assert.match(await call('status', {}, A), /aaaa1111/, 'status names the session before launch')
 
   await call('open', { url: dataUrl('page-a') }, A)
   await call('open', { url: dataUrl('page-b') }, B)
@@ -103,18 +109,21 @@ function mount() {
   console.log('PASS 1: launch mode — per-session browsers, serialization, disposal cleanup')
 }
 
-// ── 3: attach mode — one shared Chrome, one tab per session ─────────────────
+// ── 2: attach mode — one shared Chrome, one tab per session ─────────────────
 {
   const shared = await chromium.launch({
     headless: true,
+    // 和插件一样优先复用系统 Chrome（PW_CHROMIUM_PATH）；没有时才回落
+    // playwright-core 自带的那份（需要 ms-playwright 缓存已下载）。
+    executablePath: process.env.PW_CHROMIUM_PATH || undefined,
     args: ['--no-sandbox', '--remote-debugging-port=9333'],
   })
   // a real user's Chrome always has at least one tab
   await shared.newPage()
   try {
     const { call, teardown } = mount()
-    const A = fakeAgent('cccc3333-session-a')
-    const B = fakeAgent('dddd4444-session-b')
+    const A = fakeAgent('session-cccc3333-53de-4c17-945f-bb7d7a457a29')
+    const B = fakeAgent('session-dddd4444-53de-4c17-945f-bb7d7a457a29')
     const endpoint = 'http://127.0.0.1:9333'
 
     await call('attach', { endpoint }, A)
@@ -128,6 +137,7 @@ function mount() {
     const targets = list.filter((t) => t.type === 'page')
     assert.equal(targets.length, 2, 'each attached session should own a distinct tab')
     assert.match(await call('status', {}, A), /tab-a/)
+    assert.match(await call('status', {}, A), /cccc3333/, 'attach mode also names the session')
     assert.match(await call('status', {}, B), /tab-b/)
 
     // explicit takeover: B pins A's tab; A must re-pick on its next call
@@ -146,7 +156,7 @@ function mount() {
   }
 }
 
-// ── 4: PW_BROWSER_SCOPE=shared (legacy behavior, separate process) ──────────
+// ── 3: PW_BROWSER_SCOPE=shared (legacy behavior, separate process) ──────────
 {
   const code = `
     import { apply } from ${JSON.stringify(new URL('../lib/index.js', import.meta.url).href)}
@@ -168,6 +178,37 @@ function mount() {
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /SHARED-OK/, 'shared scope must keep one browser for all sessions')
   console.log('PASS 3: PW_BROWSER_SCOPE=shared restores the legacy single browser')
+}
+
+// ── 4: status names the session and explains the next action (regression) ───
+{
+  // 两个曾经的 bug：needAttach 文案没拼会话（README 却承诺 status 一定标明），
+  // 以及 attach({endpoint:'launch'}) 之后仍说"未配置 CDP 端点"。
+  // 端点故意指向没人监听的端口——status 只读，绝不会去连它。
+  const code = `
+    import { apply } from ${JSON.stringify(new URL('../lib/index.js', import.meta.url).href)}
+    const tools = new Map()
+    apply({ tools: { register: (d) => tools.set(d.name, d) }, effect: () => () => {}, get: () => undefined })
+    const agent = { id: 'session-1234abcd-53de-4c17-945f-bb7d7a457a29', ctx: { effect: () => {} } }
+    const call = (n, a = {}) => tools.get('browser_' + n).execute(a, { agent })
+    const flat = (t) => String(t).replace(/\\s*\\n\\s*/g, ' | ')
+    console.log('NEED:' + flat(await call('status')))
+    await call('attach', { endpoint: 'launch' })
+    console.log('FORCED:' + flat(await call('status')))
+  `
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
+    encoding: 'utf8',
+    env: { ...process.env, PW_CDP_ENDPOINT: 'http://127.0.0.1:9999', PW_CDP_PAGE: '', PW_BROWSER_SCOPE: '' },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /NEED:[^\n]*1234abcd/, 'not-yet-attached status must name the session')
+  assert.match(r.stdout, /NEED:[^\n]*127\.0\.0\.1:9999/, 'status must name the configured endpoint')
+  assert.match(
+    r.stdout,
+    /FORCED:[^\n]*(?:自建模式|pinned to the plugin's own browser)/,
+    'after attach({endpoint:"launch"}) status must not claim "no endpoint configured"',
+  )
+  console.log('PASS 4: status names the session and explains the next action before attaching')
 }
 
 console.log('All session-isolation tests passed.')

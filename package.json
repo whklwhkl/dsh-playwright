@@ -9,6 +9,9 @@
     "./skill-provider": "./lib/skill-provider.js",
     "./package.json": "./package.json"
   },
+  "scripts": {
+    "test": "node scripts/test-session-isolation.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

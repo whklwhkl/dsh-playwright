@@ -155,7 +155,7 @@ export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
 - **挂载模式**：大家共享你那个浏览器（这正是挂载的意义），但每个会话驱动**自己的标签页**：选页时跳过其他存活会话正在用的标签，全被占用就新开一个（同一 context，登录态继承）。显式 `page=`/`browser_tabs` 接手优先，被挤掉的会话下次调用自动改挑，不会互相抢。
 - **生命周期跟着会话走**：浏览器挂在会话自己的 cordis scope 上（`exec.agent.ctx.effect`，与 `dsh-tool-bash-persistent` 持有每会话 shell 同一条路）。会话/子代理结束时自建实例被关闭、挂载连接被断开；插件卸载时兜底清理全部。子代理也是独立 agent，同样各 fork 各的，用完即收。
 - **同一会话内串行**：并行的 `browser_*` 调用在会话内排队执行，不会在选页/换页上打架；`browser_status` 是只读查询，不排队。
-- `browser_status` 会标明所属会话；自动截图文件名带会话标记（`shot-<时间戳>-<会话>.png`），并发截图不互相覆盖。
+- `browser_status` 会标明所属会话（任何状态下，包括还没挂载时）；会话标记取会话 id 去掉 `session-` 前缀后的前 8 位（如 `90b1706a`）。自动截图文件名也带这个标记（`shot-<时间戳>-<会话>.png`），并发截图不互相覆盖。
 - 想回到老行为（全 profile 共用一个浏览器）：设 `PW_BROWSER_SCOPE=shared`。
 
 自测（不启动 DSH，真实起 Chromium 验证双会话隔离/挂载分页/销毁清理）：
