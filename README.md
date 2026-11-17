@@ -3,255 +3,117 @@
 [![Release](https://img.shields.io/github/v/release/whklwhkl/dsh-playwright)](https://github.com/whklwhkl/dsh-playwright/releases)
 [![License: MIT](https://img.shields.io/github/license/whklwhkl/dsh-playwright)](./LICENSE)
 
-DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一套 `browser_*` 模型工具，用 Playwright 驱动 Chromium 真实操作网页——打开页面、点击、填表、抓取 DOM、截图。
+DSH (DeepSeek Harness) 浏览器自动化插件：给智能体提供一组 `browser_*` 模型工具，用 Playwright 驱动 Chromium 真实操作网页——打开页面、点击、填表、抓取 DOM、截图。
 
-> 兼容性：对 [dsh 0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) 实测通过——`browser_*` 工具注册与实际驱动、内置 skill、bundle 装配都在该版本上跑过。
->
-> 从 dsh 0.2.0-rc.2 起多了一道**插件兼容闸门**：dsh 会读插件的 `peerDependencies`，凡是声明了 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 且 semver 不满足当前运行时的插件行，会被**直接拒绝加载**（插件管理里报 `incompatible-version`），需要 `dsh plugin allow-version <包>@<版本> --dsh-version <版本> --accept-risk` 才放行。本插件据此声明了 `@deepseek-ai/dsh: ^0.2.0-rc.2`（覆盖整个 0.2.x 线），并同步写了 `engines.dsh`。升级 dsh 到 0.3 及以上时请同步更新本插件，否则会被闸门拦下。
->
-> 该 peer 标记为 `optional`：dsh 给每个 profile 写了 `autoInstallPeers: false`，运行时的 dsh 由安装目录提供、不由 profile 安装，标成 optional 只是避免 pnpm 报"未满足的 peer"——闸门读的是 `peerDependencies` 本身，不受 `peerDependenciesMeta` 影响。
+> **兼容性**：实测支持 [dsh 0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2) 及以上版本（`^0.2.0-rc.2`）。
 
-- 宿主进程内直接 `require('playwright-core')`，自建模式下无需外部桥服务或端口
-- **每个会话自己的浏览器**：浏览器按会话（`exec.agent`）懒启动，像进程 fork 一样各用各的窗口，互不抢页；会话结束时自动关闭/断开（见下文「多会话」）
-- 可选**挂载已经打开的浏览器**（CDP attach）：直接接管你正在用的 Chrome/Edge，登录态、Cookie、扩展、已开标签页全都在；多会话挂载同一浏览器时各自驱动自己的标签页（见下文）
-- 只依赖 `playwright-core`，无其他运行时依赖
-- **中断即取消**：转发 `exec.signal`——`goto`/`click`/`fill`/`type`/`press`/`innerText`/`screenshot` 把取消信号直接交给 Playwright（在途操作真的被中止），Playwright 无法取消的调用（`connectOverCDP`、`launch`、`evaluate`、`waitForTimeout` …）也保证立刻结算，不会把整轮对话吊在那里
-- **失败就是失败**：出错时直接抛，由 dsh 渲染成带 `isError` 的规范失败结果（正文是 `Error: …`），不再拼成"看起来成功"的字符串——重试/纠错类策略和会话日志都能看见
-- **截图能"看"**：`browser_screenshot` 把 PNG 交给 profile 的 attachment 服务，以图片块与路径一起内联；支持图片输入的模型直接看到画面（不支持时 dsh 自动换成占位文本，仍可用返回的路径调 `read_image`）
-- 工具描述/参数文档/输出文案支持中英双语（`PW_LANG=en` 切换，默认中文）— [English README](./README.en.md)
+- ⚡️ **轻量免服务**：宿主进程内直接加载 `playwright-core`，自建模式下无需任何外部桥接服务或独立端口。
+- 🔀 **按会话天然隔离**：每个会话/子代理懒启动独立的浏览器实例，互不抢页，生命周期随会话销毁自动清理。
+- 🔑 **无缝复用登录态**：支持原生 CDP 挂载接管已有 Chrome/Edge，保留全部 Cookie、扩展与打开的标签页。
+- 🛑 **真取消与规范报错**：取消信号直接下发中止底层操作；出错抛出规范失败结果（`isError`），便于模型自主纠错。
+- 📸 **多模态截图**：`browser_screenshot` 自动生成图片并内联至对话，支持视觉输入的模型可直接看到网页画面。
+- 🌐 **中英双语支持**：工具描述与输出文案随 `PW_LANG` 自动切换（默认中文）— [English README](./README.en.md)。
 
-## 功能一览
+---
 
-| 工具 | 作用 |
-|---|---|
-| `browser_open` | 打开 URL，返回最终地址与页面标题 |
-| `browser_status` | 查询当前会话的浏览器/页面状态（是否挂载、端点、URL、标题、标签页数、所属会话） |
-| `browser_attach` | 运行时挂载/切换到一个已在运行的浏览器（无需重启 DSH） |
-| `browser_tabs` | 列出/切换/关闭已打开的标签页（挂载模式下的"接手"入口） |
-| `browser_click` | 点击元素（CSS 或 `text=` 选择器） |
-| `browser_type` | 逐字输入（可设 `delay` 模拟真人） |
-| `browser_fill` | 快速填充输入框 |
-| `browser_press` | 按键（Enter / Tab / Escape …） |
-| `browser_wait` | 等待若干毫秒 |
-| `browser_extract` | 抓取页面或指定元素的文本 |
-| `browser_html` | 抓取页面或指定元素的 HTML |
-| `browser_eval` | 在页面上下文执行 JS 表达式（诊断 DOM 等） |
-| `browser_screenshot` | 截图保存为 PNG 并返回绝对路径；支持图片输入的模型同时看到画面本身 |
-| `browser_close` | 关闭当前会话的浏览器释放资源（挂载模式下只断开连接，不影响其他会话） |
+## 快速开始
 
-## 安装到 DSH profile
+### 1. 安装插件到 DSH Profile
 
-在任意目录执行一条命令（`dsh` 自行定位 profile 目录，首次使用会自动初始化）：
+在任意目录执行一条命令安装（以 `web` profile 为例）：
 
 ```bash
-# 示例：装进 web profile
 dsh plugin --profile web add git+https://github.com/whklwhkl/dsh-playwright.git
 ```
 
-`dsh plugin` 把 `add` 之后的参数原样转发给 profile 目录里的 pnpm，安装完成后自动把声明了 `dsh.bundle` 的依赖追加进 `dsh.profile.bundles`——无需手改 `package.json`。registry 包名、`github:<user>/<repo>`、本地路径等 pnpm 支持的安装源均可。
+> **本地开发**：指向本地检出目录并使用 `link:` 前缀软链接安装（安装前需在插件根目录运行 `pnpm install` 安装依赖）：
+> ```bash
+> dsh plugin --profile web add link:/path/to/dsh-playwright
+> ```
 
-本地开发时指向 checkout 目录，加 `link:` 前缀以符号链接安装，改动后无需重新安装（重启 DSH 生效）：
+安装完成后**重启 DSH**，`browser_*` 工具即对该 profile 下的所有会话自动生效。
 
-```bash
-dsh plugin --profile web add link:/path/to/dsh-playwright
-```
+### 2. 准备浏览器（三选一）
 
-> `link:` 装的是符号链接，**插件自己的依赖不会跟着进 profile**：先在这个 checkout 里跑一次 `pnpm install`（装 `playwright-core`），否则 dsh 加载插件时会报 `Cannot find package 'playwright-core'`，`browser_*` 工具直接消失。仓库里那份 `pnpm-workspace.yaml`（`autoInstallPeers: false`）也是为此——dsh 给每个 profile 写的就是同一份设置，它阻止 pnpm 顺着 `peerDependencies` 把整个 `@deepseek-ai/dsh` 运行时树拉进这个仓库。
->
-> 如果工具是"先能用、重装插件后消失"，先重启 dsh：宿主插件加载失败不会被自动重试。
+`playwright-core` 本身不内置浏览器内核，首次使用前请选择以下任一方式：
 
-**重启 DSH：** bundle 列表在启动时读取，重启后 `browser_*` 工具对 profile 下所有会话自动可用。
+- **方式 A：自动下载 Chromium（推荐，零配置）**
+  ```bash
+  npx playwright-core install chromium
+  ```
+- **方式 B：复用系统已安装的 Chrome / Edge（免下载）**
+  ```bash
+  export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  # Linux: export PW_CHROMIUM_PATH="/usr/bin/google-chrome"
+  ```
+- **方式 C：挂载已有 Chrome 浏览器（复用登录态）**
+  在目标 Chrome 中打开 `chrome://inspect/#remote-debugging` 并勾选允许，然后配置：
+  ```bash
+  export PW_CDP_ENDPOINT=chrome
+  ```
+  *(挂载机制、Chrome 136+ 授权弹窗应对与多标签接手详见 [CDP 挂载指南](./docs/cdp-attach.md))*
 
-> 旧版 dsh 没有 `plugin` 子命令时：手动把 `playwright-browser` 加入 profile `package.json` 的 dependencies，并追加进 `dsh.profile.bundles`，再在 profile 目录执行 `pnpm install`。
+### 3. 与智能体对话
 
-## 准备浏览器
+配置完成后即可在对话中直接让智能体操作网页：
+- *"用浏览器打开 https://example.com，把正文抓取给我"*
+- *"打开必应，搜索「playwright」，把第一条结果标题告诉我"*
+- *"挂上我的 Chrome，把当前标签页的内容提取出来"*
+- *"看看我浏览器里开了哪些标签页，切到控制台那个页面点一下刷新"*
 
-`playwright-core` **不会**自动下载浏览器，首次使用前需要准备 Chromium，二选一：
+---
 
-### 方式 A：让 playwright-core 自动下载（推荐，零配置）
+## 功能清单速查
 
-```bash
-# 任选其一（等价）：
-npx playwright-core install chromium
-# 或安装完整版 playwright 借其下载器：
-npm i -D playwright && npx playwright install chromium
-```
-
-下载的浏览器会进入系统标准缓存（macOS 为 `~/Library/Caches/ms-playwright`，Linux 为 `~/.cache/ms-playwright`），插件启动时自动发现。
-
-### 方式 B：复用系统已有的 Chrome/Edge/Chromium（免下载）
-
-给运行 DSH 的进程设置环境变量，指向任意现成浏览器可执行文件：
-
-```bash
-export PW_CHROMIUM_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-# Linux 示例：export PW_CHROMIUM_PATH="/usr/bin/google-chrome"
-```
-
-> 版本提示：自动发现依赖 playwright-core 与其期望的 Chromium build 号匹配（`npx playwright-core install chromium` 总是安装匹配版本）。用 `PW_CHROMIUM_PATH` 指向任意 Chromium 系浏览器则无版本要求。
-
-### 方式 C：挂载已经打开的浏览器（复用登录态）
-
-上面 A/B 两种方式都是让插件**新起**一个干净浏览器——没有登录态、没有扩展、没有你手动打开的标签页。若要让智能体直接在你**正在使用的** Chrome 里干活，用挂载模式：
-
-```bash
-export PW_CDP_ENDPOINT=chrome        # 真实默认 profile，推荐
-# 或 export PW_CDP_ENDPOINT=http://127.0.0.1:9222   # 指定调试端口
-# 或 export PW_CDP_ENDPOINT=auto      # 先试 chrome，再试 9222
-```
-
-`chrome` 这个取法要求你在目标浏览器里开启一次远程调试开关（Chrome 136+ 的安全策略，默认关闭）：
-
-1. 地址栏打开 `chrome://inspect/#remote-debugging`
-2. 勾选 **Allow remote debugging for this browser instance**
-
-之后插件即可挂载你的默认 profile：Cookie、登录态、扩展、已打开的标签页全都在。
-
-> ⚠️ **每次新建 CDP 连接，Chrome 都会弹一次「要允许远程调试吗？」**（实测 Chrome 153，这是 `chrome://inspect` 开关的激进安全策略，无法配置成"记住授权"）。在你点「允许」之前，WebSocket 升级握手一直被**静默挂起**，所以表现就像"连不上/无缘无故超时"。
-> 因此：**第一次挂载请留意 Chrome 窗口，点一次「允许」**；之后插件会复用这一条连接，不再弹框（`browser_attach` 同一端点、`browser_tabs`、`browser_open` 等都不会重新建连）。`browser_close`/插件重载会断开，下次挂载需要再点一次。
-
-想改用端口方式（`http://127.0.0.1:9222`）时注意：Chrome 136 起 `--remote-debugging-port` 对**默认数据目录**不再生效，必须同时指定一个专属目录，并且该 Chrome 需先完全退出：
-
-```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug"
-```
-
-> 这条路子**完全不弹授权框**（不走 `chrome://inspect` 开关），`/json/version` 也正常，代价是那个专属目录是新的：需要在那里登录一次你要用的站点。适合无人值守/长期自动化；想直接用现有登录态就用上面的 channel 名 `chrome`。
-
-> 两种取法不能混用（实测）：用 `chrome://inspect` 开关启动的浏览器**只提供 WebSocket 端点，不响应 HTTP 发现接口**（`http://127.0.0.1:9222/json/version` 返回 404），所以对这类实例只能写 channel 名 `chrome`；反过来，用 `--remote-debugging-port` 起的实例两种写法都行。
-> 插件现在自己读 `DevToolsActivePort`（第 1 行端口 + 第 2 行 GUID 路径）来解析 `chrome`，**不再走 Playwright 内置的 channel 解析**——后者只取端口、丢掉 GUID 路径，在 Chrome 153 上必然连不上。
-
-**不想重启 DSH 也能挂载：** 直接让智能体调用 `browser_attach`（也可以自己说"挂上我的 Chrome"）。它接受与 `PW_CDP_ENDPOINT` 相同的写法，并且：
-
-| 调用 | 作用 |
+| 工具 | 作用 |
 |---|---|
-| `browser_attach` | 缺省端点：已挂载就保持当前端点，否则用 `PW_CDP_ENDPOINT`（未设置则 `auto`） |
-| `browser_attach({ endpoint: "chrome" })` | 挂到该端点（channel 名 / `http://…` / `ws://…` / `auto` / 逗号分隔回退） |
-| `browser_attach({ page: "portal" })` | 不换浏览器，只按 URL/标题子串换要接手的标签页；命中不到会报错 |
-| `browser_attach({ endpoint: "launch" })` | 不再挂载，切回插件自建的干净浏览器（忽略环境变量） |
+| `browser_open` | 打开指定 URL，返回最终地址与页面标题 |
+| `browser_status` | 查询当前会话的浏览器/页面状态（挂载状态、端点、当前 URL、标签数、所属会话） |
+| `browser_attach` | 运行时动态挂载/切换到一个正在运行的浏览器（支持换端点或换标签页） |
+| `browser_tabs` | 列出、切换（置前）或关闭已打开的标签页 |
+| `browser_click` | 点击指定选择器或文本匹配的元素 |
+| `browser_type` | 逐字模拟真人键盘输入（支持设置输入延迟） |
+| `browser_fill` | 快速填充表单输入框 |
+| `browser_press` | 触发按键事件（Enter、Tab、Escape 等） |
+| `browser_wait` | 页面等待指定毫秒数 |
+| `browser_extract` | 提取当前页面或指定元素的文本内容 |
+| `browser_html` | 抓取当前页面或指定容器的完整 HTML 结构 |
+| `browser_eval` | 在页面上下文执行自定义 JavaScript 表达式（诊断 DOM 等） |
+| `browser_screenshot` | 截图保存为 PNG，同时为支持图片输入的模型内联画面 |
+| `browser_close` | 关闭当前会话的自建浏览器实例（挂载模式下仅安全断开连接） |
 
-挂载模式的行为约定：
+---
 
-- `browser_status` **不会**主动建立连接（一条新连接 = 一次授权弹窗，只读查询不值得让用户点框）；未挂载时它会告诉你去调 `browser_attach`；
-- 同一端点上重复 `browser_attach` 会**复用现有连接**（只按 `page` 子串重选标签页），不会断开重连、不会又弹一个授权框；
-- `browser_tabs` 列出全部标签页（`*` = 当前操作页），传 `index` 或 `url` 子串即可切换（会置前），加 `close:true` 关闭该标签页；
-- 取标题这类"顺手带的信息"都有**往返预算**：某个标签的渲染进程卡死（死循环、Chrome 的「页面无响应」、DevTools 里断点暂停）时，它会被标成 `(无响应)`，整次调用仍在约 `PW_RTT_TIMEOUT` 毫秒内返回，而不是挂住整轮对话；
-- `browser_open` 在**当前跟踪的标签页**里导航——别拿它去覆盖你不想丢的页面，可以先 `browser_tabs` 选一个；
-- `browser_close` **只断开连接，绝不关闭你的浏览器**（自建实例模式下才是真的关闭），且只影响当前会话；
-- **多会话各自一个标签页**：两个会话挂载同一个浏览器时，先到的会话挑中标签页后，后到的会话会跳过它、挑另一个空闲标签（全被占用就新开一个，登录态照样继承）；用 `browser_attach({page:…})` / `browser_tabs` 显式接手可以无视占用，被挤掉的会话下次调用会自动改挑别的标签，不会反过来抢回去；
-- `PW_CDP_PAGE` 可按 URL/标题子串固定要接手的标签页；
-- 挂载失败时会打印诊断：端口是否在监听、`/json/version` 的 HTTP 状态、`DevToolsActivePort` 内容；并且区分「WS 握手就没完成」（= 在等你点「允许远程调试」）与「握手完成了但初始化没结束」（= 某个标签的渲染进程不响应，报错里会列出各标签帮你定位）；
-- 连接预算由 `PW_CDP_TIMEOUT` 控制（默认 90 秒，留够看到弹窗并点一下的时间）；端口无人监听时仍然毫秒级快速失败，不会白等；
-- 该模式下 `PW_HEADLESS`、`PW_CHROMIUM_PATH` 无效（浏览器是你自己起的）。
+## 内置技能：playwright-browser-tips
 
-> 与 [webclaw3](https://github.com/fatmind/webclaw3) 的区别：webclaw3 走 Chrome 扩展桥接 + 本地服务，本插件走 Playwright 原生 CDP 挂载，不需要装扩展；代价是 CDP 看不到 `chrome://` 等特权页面（扩展桥接可以）。
+插件内置了一个 `playwright-browser-tips` skill（包含主流站点在自动化环境下的实测表现与避坑对策，如搜索任务优先选择 Bing 等）。模型在操作报错或遇到登录墙时会自动加载，用户也可随时在对话框输入 `/playwright-browser-tips` 手动调用。
 
-## 多会话：每个会话自己的浏览器
+- 站点表现地图欢迎社区共建，详见 [SITE-MAP-SPEC.md](./SITE-MAP-SPEC.md)。
 
-0.6 之前整个 profile 只有一份浏览器状态，所有会话共用——并行开会话时大家抢同一个窗口、同一个"当前标签页"。现在浏览器状态**按会话隔离**，像进程 fork 一样：
+---
 
-- **自建模式**：每个会话第一次调 `browser_*` 时懒启动**自己的** Chromium 实例，窗口、Cookie、标签页完全独立；一个会话 `browser_close` 或结束，不影响别的会话。
-- **挂载模式**：大家共享你那个浏览器（这正是挂载的意义），但每个会话驱动**自己的标签页**：选页时跳过其他存活会话正在用的标签，全被占用就新开一个（同一 context，登录态继承）。显式 `page=`/`browser_tabs` 接手优先，被挤掉的会话下次调用自动改挑，不会互相抢。
-- **生命周期跟着会话走**：浏览器挂在会话自己的 cordis scope 上（`exec.agent.ctx.effect`，与 `dsh-tool-bash-persistent` 持有每会话 shell 同一条路）。会话/子代理结束时自建实例被关闭、挂载连接被断开；插件卸载时兜底清理全部。子代理也是独立 agent，同样各 fork 各的，用完即收。
-- **同一会话内串行**：并行的 `browser_*` 调用在会话内排队执行，不会在选页/换页上打架；`browser_status` 是只读查询，不排队。
-- `browser_status` 会标明所属会话（任何状态下，包括还没挂载时）；会话标记取会话 id 去掉 `session-` 前缀后的前 8 位（如 `90b1706a`）。自动截图文件名也带这个标记（`shot-<时间戳>-<会话>.png`），并发截图不互相覆盖。
-- 想回到老行为（全 profile 共用一个浏览器）：设 `PW_BROWSER_SCOPE=shared`。
+## 进阶指南与参考手册
 
-自测（不启动 DSH，真实起 Chromium 验证双会话隔离/挂载分页/销毁清理）：
+为方便快速定位特定场景的技术细节，深入文档已移至 `docs/` 目录：
 
-```bash
-node scripts/test-session-isolation.mjs
-```
+- 📖 **[Chrome 挂载与登录态复用指南 (CDP Attach)](./docs/cdp-attach.md)**
+  详解如何接管本地 Chrome、Chrome 136+ 远程调试授权弹窗机制、专属端口模式对比以及多会话多标签页接手规则。
+- ⚙️ **[配置与多会话机制手册 (Configuration & Sessions)](./docs/configuration.md)**
+  完整环境变量列表（超时时间、语言、截图路径等）与底层 Per-Session Browser 隔离架构实现。
+- 🛠️ **[故障排查手册 (Troubleshooting)](./docs/troubleshooting.md)**
+  按分类整理的常见问题速查（DSH 兼容闸门、内核下载失败、CDP 挂载超时、页面卡死与反爬对抗）。
+- 💻 **[面向开发者与 Agent 的工作约定 (AGENTS.md)](./AGENTS.md)**
+  本地自测运行、无热重载事实、代码审查协议与已知开发陷阱。
 
-## 配置（环境变量）
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `PW_LANG` | `zh` | 设为 `en` 切换工具描述与输出为英文 |
-| `PW_BROWSER_SCOPE` | `session` | 每个会话独占自己的浏览器/标签页；设为 `shared` 回到 0.6 之前"全 profile 共用一个浏览器"的老行为 |
-| `PW_CHROMIUM_PATH` | 自动发现 | 复用指定浏览器可执行文件 |
-| `PW_HEADLESS` | `true` | 设为 `false` 弹出可见窗口（挂载模式下无效） |
-| `PW_SHOT_DIR` | 插件目录下 `shots/` | 截图保存目录 |
-| `PW_CDP_ENDPOINT` | 未设置 | 设置后进入挂载模式：`chrome` / `msedge` 等 channel 名、`http://127.0.0.1:9222`、`ws://…`，逗号分隔可做回退，`auto` = 先 chrome 再 9222 |
-| `PW_CDP_PAGE` | 未设置 | 挂载时按 URL 或标题**子串**挑选要接手的标签页 |
-| `PW_CDP_TIMEOUT` | `90000` | 挂载连接预算毫秒。它同时是"等你在授权框上点允许"的窗口；端口无人监听时仍毫秒级快速失败 |
-| `PW_RTT_TIMEOUT` | `1500` | 单次页面往返（取标题、置前）的预算毫秒。渲染进程卡死时靠它快速失败并标记 `(无响应)`，而不是把整次调用挂死 |
-
-## 内置 skill：playwright-browser-tips
-
-bundle 同时携带一个 `playwright-browser-tips` skill，正文是一张**站点地图**：各站点在自动化下的实测行为与对策（搜索类任务默认 Bing），加上通用恢复手法与登录态复用要点。中英双语跟随 `PW_LANG`；模型在 browser_* 工具失败或自动化搜索/登录流程时按需加载，用户也可以直接输入 `/playwright-browser-tips` 调用。
-
-地图欢迎共建——人和 agent 都可以按 [SITE-MAP-SPEC.md](./SITE-MAP-SPEC.md) 的规范提交条目（只改 `assets/site-map.json`），提交前运行 `node scripts/validate-site-map.js` 并把输出贴进 PR。框架文本（含反自动化边界：验证码一律由用户人工完成）由代码持有，不随地图数据变化。
-
-skill 需要带 skill 注册表的 profile——web、headless、acp、sdk-app 等基于 `dsh-base` 的 profile 均满足。同名项目或用户目录 skill 优先级更高，可本地覆盖插件内置版本。
-
-## 使用示例（对智能体说的话）
-
-- "用浏览器打开 https://example.com，抓取正文给我"
-- "打开百度，搜索「playwright」，把第一条结果标题告诉我"
-- "打开这个页面 https://…，点击「登录」，截个图"
-- "挂上我的 Chrome，把当前标签页的正文抓下来"（智能体调用 `browser_attach`，或设 `PW_CDP_ENDPOINT`）
-- "看看我浏览器里都开了哪些标签页，切到那个 XXX 页面然后点登录"（同上）
-
-## 故障排查
-
-| 现象 | 处理 |
-|---|---|
-| `Executable doesn't exist ... ms-playwright` | 浏览器未下载，执行 `npx playwright-core install chromium` |
-| 下载 Chromium 时连接中断/超时（代理环境常见） | 大文件经代理易被中断；改用方式 B 的 `PW_CHROMIUM_PATH` 指向系统 Chrome，免下载 |
-| `Could not connect to chrome: DevToolsActivePort file not found` | 目标浏览器没开远程调试：去 `chrome://inspect/#remote-debugging` 勾选允许，或改用 `PW_CDP_ENDPOINT=http://127.0.0.1:9222` 并以专属 `--user-data-dir` 启动 Chrome |
-| `http://127.0.0.1:9222` 报 `Unexpected status 404 ... /json/version/` | 该端口上的浏览器是用 `chrome://inspect` 开关开的：它不提供 HTTP 发现接口，改用 channel 名 `chrome`（或 `browser_attach({endpoint:"chrome"})`） |
-| `connect ECONNREFUSED 127.0.0.1:9222` | 目标浏览器没起来或端口不对：确认它带 `--remote-debugging-port=9222` 启动，且 `curl http://127.0.0.1:9222/json/version` 有返回 |
-| `CDP 挂载失败（已尝试 N 个端点）` | 端点不对或浏览器没开调试；报错里会逐个列出失败原因 + 端口是否在监听 + `/json/version` 状态 + `DevToolsActivePort` 内容，不用手工摸排 |
-| 挂载报 `Timeout ... exceeded`，同时提示"端口在监听但 WS 握手一直没完成" | **Chrome 在等你点授权框**：切到 Chrome 窗口点「允许远程调试」的「允许」，再调一次 `browser_attach`。框没看到就翻一下其他窗口/最小化的 Chrome；点得慢就把 `PW_CDP_TIMEOUT` 调大 |
-| 挂载报 `Timeout ... exceeded`，提示是"WS 握手已经完成，但初始化一直没结束" | **不是授权框问题**：浏览器里有标签的渲染进程不响应（挂载要等所有已存在的标签页初始化完）。报错里会列出当前标签，关掉那个卡住的（Chrome 里常显示"页面无响应"）再重试；想快速失败可调小 `PW_CDP_TIMEOUT` |
-| 同上，而且你刚经历过**电脑意外关机 / Chrome 异常退出后重开** | 同一条原因：Chrome 恢复会话时留下的那些挂起标签一直没真正加载，也算"没初始化完"（实测踩过）。把那些标签关掉（或先 `browser_attach({endpoint:"launch"})` 用自建实例绕开），或者干脆清掉 `PW_CDP_ENDPOINT` 不挂载 |
-| `browser_tabs` 某一行的标题是 `(无响应)` | 那个标签的渲染进程卡死了（死循环、Chrome 的"页面无响应"、DevTools 里断点暂停）。它的标题和页面操作都取不到，别再驱动它；在浏览器里关掉它即可恢复。若整行是 `(无标题)` 则只是页面本身没有标题 |
-| `browser_tabs` / `browser_status` 卡住不返回 | 0.4.0 及更早版本会把整次调用挂在无响应标签的标题上。0.4.1 起有往返预算（`PW_RTT_TIMEOUT`，默认 1500ms），最坏也只是标成 `(无响应)` |
-| 每调一次 `browser_attach` 都弹一次授权框 | 说明中间断开过（`browser_close`、插件重载、DSH 重启）。同一端点上重复 `browser_attach` 现在会复用连接；想彻底摆脱弹框就改用专属 `--user-data-dir` 的端口方式（见方式 C） |
-| 挂载模式下 `browser_open` 覆盖了我正在看的页面 | 正常现象——它导航的是"当前跟踪的标签页"；先 `browser_tabs` 切到目标页，或用 `PW_CDP_PAGE` 固定 |
-| `net::ERR_CONNECTION_CLOSED` | 目标站点网络问题或反爬，换个站点/稍后重试 |
-| 站点弹验证码（如百度滑块）、headless 下输入框不可见 | 反自动化机制，非插件问题；实测 Bing 全流程可用，可优先换 Bing，或设 `PW_HEADLESS=false` 用有头模式 |
-| 元素"not visible" | 页面改版或选择器过时，用 `browser_eval` 检查 DOM 再选选择器 |
-| 截图只返回路径、没有画面 | 三种原因：profile 没挂 attachment 服务（`dsh-base` 系 profile 都挂了）、图片超出部署上限、或当前模型不接受图片输入。后两种不影响使用——路径照常返回，可用 `read_image` 查看 |
-| `browser_open` 报 `net::ERR_*` 后，再开任何页面都报 `... is interrupted by another navigation to chrome-error://...` | 0.5.0 之前的老问题：失败的导航会在那个标签里挂起一条错误页导航，把该标签的后续导航全部堵死（reload 也救不回来）。0.5.0 起 `browser_open` 检测到这类失败会自动换掉那个 page（自建实例关掉重开；挂载模式改为新开一个标签，**不关你的标签**） |
-| 失败结果的正文从 `错误：…` 变成了 `Error: …` | 0.5.0 起错误直接抛给 dsh，由它渲染成规范失败结果（`isError`）：前缀由 dsh 决定，因此是英文。工具是否失败看 `isError`，不要匹配文案 |
-
-## 本地开发 / 快速自测
-
-```bash
-# 不启动 DSH，直接验证模块加载与工具注册：
-node --input-type=module -e "
-import { apply } from './lib/index.js'
-const tools = []
-apply({ tools: { register: (d) => tools.push(d) }, effect: () => () => {} })
-console.log(tools.map((t) => t.name).join('\n'))
-"
-
-# 挂载模式冒烟测试（另开一个终端，先按"方式 C"起好可调试的 Chrome）：
-# 不设 PW_CDP_ENDPOINT 也行——browser_attach 可以运行时指定端点
-node --input-type=module -e "
-const { apply } = await import('./lib/index.js')
-const m = new Map()
-apply({ tools: { register: (d) => m.set(d.name, d) }, effect: () => () => {} })
-const call = (n, a = {}) => m.get('browser_' + n).execute(a)
-console.log(await call('attach', { endpoint: 'http://127.0.0.1:9222' }))  // 挂载
-console.log(await call('tabs'))                                          // 列出现有标签页
-console.log(await call('attach', { endpoint: 'launch' }))                // 切回自建实例
-console.log(await call('open', { url: 'https://example.com' }))
-console.log(await call('close'))                                         // 关闭自建实例
-"
-```
+---
 
 ## 社区与支持
 
-本插件是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）生态插件，按官方[社区支持指南](https://github.com/deepseek-ai/deepseek-harness#community-and-support)添加了 `dsh-plugin` topic 以便被发现。
+本插件是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）生态插件。
 
-- 插件问题、功能建议：在本仓库提 [Issues](https://github.com/whklwhkl/dsh-playwright/issues) 或 [Discussions](https://github.com/whklwhkl/dsh-playwright/discussions)
-- DSH 框架问题与反馈：提交到 [DeepSeek Harness Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions)
-- 加入 DeepSeek Harness Discord 社区（见官方 README）
+- 插件问题与功能建议：提交至 [GitHub Issues](https://github.com/whklwhkl/dsh-playwright/issues) 或 [Discussions](https://github.com/whklwhkl/dsh-playwright/discussions)
+- DSH 框架问题与交流：访问 [DeepSeek Harness 社区](https://github.com/deepseek-ai/deepseek-harness)
 
 ## License
 
-MIT
+[MIT](./LICENSE)
