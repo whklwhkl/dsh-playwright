@@ -211,4 +211,32 @@ function mount() {
   console.log('PASS 4: status names the session and explains the next action before attaching')
 }
 
+// ── 5: JS dialog guard — auto-dismissed dialogs are recorded, never crash ───
+{
+  // 曾经的崩溃：插件不注册任何 dialog listener 时，playwright 自动 dismiss 走
+  // `dialog._close().then(() => {})`（无 .catch()）；dialog 转眼消失时
+  // Page.handleJavaScriptDialog 抛 "No dialog is showing"，unhandled rejection
+  // 直接杀掉整个 DSH 进程。守卫注册后由插件负责 dismiss 并吞掉竞态错误，
+  // 且 browser_status 会记录最近一次自动处理的弹窗。
+  const { call, teardown } = mount()
+  const A = fakeAgent('session-eeee7777-53de-4c17-945f-bb7d7a457a29')
+  await call(
+    'open',
+    {
+      url:
+        'data:text/html,<title>dlg</title><script>setTimeout(function(){alert("crash-test-dialog")},80)</script>',
+    },
+    A,
+  )
+  // 等 alert 弹出并被守卫处理
+  await new Promise((r) => setTimeout(r, 700))
+  const st = await call('status', {}, A)
+  assert.match(st, /crash-test-dialog/, 'status must record the auto-handled dialog')
+  assert.match(st, /eeee7777/, 'dialog note must not displace the session label')
+  // 进程还活着（测试能继续）且页面可用 = 守卫正常工作
+  assert.equal(await call('eval', { expression: 'document.title' }, A), 'dlg')
+  await teardown()
+  console.log('PASS 5: JS dialogs are auto-dismissed by the plugin guard and shown in status')
+}
+
 console.log('All session-isolation tests passed.')
